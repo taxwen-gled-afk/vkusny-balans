@@ -1044,6 +1044,26 @@ scr.addEventListener('click', e => {
   else if (d.sweet != null) dessertSheet(+d.sweet);
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+// ---------- выбор из списка на Android ----------
+// В Telegram на части Android-телефонов обычный <select> не раскрывается. Показываем свой список поверх экрана,
+// выбор записываем в тот же <select> и шлём change — остальной код ничего не замечает.
+const customSelect = () => { try { return (window.Telegram && Telegram.WebApp && Telegram.WebApp.platform === 'android') || /Android/i.test(navigator.userAgent); } catch (e) { return false; } };
+function pickFrom(sel){
+  const ov = document.createElement('div'); ov.className = 'shade'; ov.style.zIndex = 30;
+  const label = (sel.closest('.field') && sel.closest('.field').firstChild && sel.closest('.field').firstChild.textContent || '').trim();
+  ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><span class="grab"></span>${label ? `<h3>${esc(label)}</h3>` : ''}
+    <div class="list">${[...sel.options].map((o, i) => `<button class="dish" type="button" data-opt="${i}" aria-pressed="${o.selected}"${o.selected ? ' style="border-color:var(--basil)"' : ''}><span class="sp nm">${esc(o.text)}</span>${o.selected ? '<span class="kc">✓</span>' : ''}</button>`).join('')}</div></div>`;
+  const opened = Date.now();
+  ov.addEventListener('click', e => { if (Date.now() - opened < 450) return;   // «клик» того же касания, которым открыли список
+    const b = e.target.closest('[data-opt]');
+    if (b) { sel.selectedIndex = +b.dataset.opt; sel.dispatchEvent(new Event('input', {bubbles: true})); sel.dispatchEvent(new Event('change', {bubbles: true})); }
+    if (b || e.target === ov) ov.remove(); });
+  $('#phone').appendChild(ov);
+}
+document.addEventListener('pointerdown', e => { const sel = e.target.closest && e.target.closest('select');
+  if (!sel || sel.disabled || !customSelect()) return; e.preventDefault(); sel.blur(); pickFrom(sel); }, true);
+['mousedown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.target.closest && e.target.closest('select') && customSelect()) e.preventDefault(); }, true));
+
 // для локальной проверки сборки (tools/smoke.js); в Telegram __smoke не задан
 if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
 start();
