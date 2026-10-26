@@ -255,8 +255,14 @@ const uid = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 function location_(cb){
   if (GAS) return google.script.url.getLocation(cb);
   const hp = new URLSearchParams(window.location.hash.replace(/^#/, '')), q = new URLSearchParams(window.location.search);
-  const key = hp.get('k') || q.get('k') || '';
-  if (key) try { history.replaceState(null, '', window.location.pathname); } catch (e) {}   // ключ не оставляем в адресе и истории
+  const store = 'fm_key:' + window.location.pathname;                         // у тестовой и рабочей страницы ключи разные
+  let key = hp.get('k') || q.get('k') || '';
+  if (!key && hp.get('tgWebAppData') == null) try { key = localStorage.getItem(store) || ''; } catch (e) {}
+  if (key) {
+    try { localStorage.setItem(store, key); } catch (e) {}
+    // ключ остаётся в «#»: так его сохранит иконка на экране «Домой», а на сервер страницы «#» не уходит
+    if (!hp.get('k')) try { history.replaceState(null, '', window.location.pathname + '#k=' + key); } catch (e) {}
+  }
   const go = () => {
     let hash = window.location.hash;
     const tg = window.Telegram && Telegram.WebApp;
@@ -277,6 +283,7 @@ function start(){
     if (!INIT) return fatal('Откройте приложение из Telegram: чат с ботом → кнопка «Открыть». Для браузера напишите боту /web, он пришлёт личную ссылку.');
     call('boot').then(d => { D = d; D.catalog.desserts = D.catalog.desserts || []; afterBoot(); })
       .catch(e => { const m = String(e && e.message || e);
+        if (m.includes('BAD_KEY')) try { localStorage.removeItem('fm_key:' + window.location.pathname); } catch (x) {}
         fatal(m.includes('BAD_KEY') ? 'Ссылка устарела. Напишите боту /web, и он пришлёт новую.' :
               m.includes('NOT_ALLOWED') ? 'Это семейное приложение. Вашего аккаунта нет в списке участников.' :
               m.includes('EXPIRED') ? 'Сессия устарела. Закройте приложение и откройте его снова из бота.' :
