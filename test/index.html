@@ -889,6 +889,8 @@ function newSweetSheet(){
     draw();
   });
 }
+// Telegram 8.0+: иконка мини-приложения на экране «Домой» (работает только со страницы на GitHub Pages)
+const homeOK = () => { try { const t = window.Telegram && Telegram.WebApp; return !!(t && t.initData && t.addToHomeScreen && t.isVersionAtLeast && t.isVersionAtLeast('8.0')); } catch (e) { return false; } };
 function profileSheet(first){
   const p = myProfile(), vits = D.vitamins.map(v => ({...v, times: [...v.times]})), kids = D.kids.map(k => ({...k})), kidsBefore = D.kids.map(k => ({...k}));
   const f = (id, label, val, attrs) => `<div class="field">${label}<input id="${id}" ${attrs || ''} value="${val == null ? '' : esc(val)}"></div>`;
@@ -908,6 +910,9 @@ function profileSheet(first){
     <h3>Дети (для расчёта порций)</h3><div id="pf-kids" style="display:flex;flex-direction:column;gap:6px"></div>
     <button class="btn ghost sm" type="button" id="pf-addkid">+ Ребёнок</button>
     <button class="btn full" type="button" id="pf-save">Сохранить</button>
+    ${homeOK() ? `<h3>Иконка на экране телефона</h3>
+    <p class="small muted" style="margin:0">Приложение откроется с экрана «Домой», как обычное, через ваш Telegram.</p>
+    <button class="btn ghost sm" type="button" id="pf-home">📱 Добавить на главный экран</button>` : ''}
     <h3>Открывать в браузере</h3>
     <p class="small muted" style="margin:0">Бот пришлёт в чат личную ссылку. Откройте её в Safari или Chrome и добавьте на экран «Домой» или рабочий стол.</p>
     <div class="row"><button class="btn ghost sm" type="button" id="pf-web">Прислать ссылку</button><button class="btn ghost sm" type="button" id="pf-webnew">Выпустить новую</button></div>`, sh => {
@@ -932,6 +937,8 @@ function profileSheet(first){
       else if (d.vtx) { const [i, j] = d.vtx.split(':'); vits[+i].times.splice(+j, 1); drawV(); }
       else if (d.vadd) { const x = vits[+d.vadd], last = x.times[x.times.length - 1] || '09:00', h = Math.min(23, +last.slice(0, 2) + 4);
         x.times.push(('0' + h).slice(-2) + last.slice(2)); drawV(); } else if (d.kx) { kids.splice(+d.kx, 1); drawK(); } });
+    const hb = sh.querySelector('#pf-home');
+    if (hb) hb.onclick = () => { try { Telegram.WebApp.addToHomeScreen(); } catch (e) { toast('Telegram не поддерживает это на вашем телефоне'); } };
     const web = renew => () => save('weblink', {renew}).then(() => toast('Ссылка в чате с ботом'));
     sh.querySelector('#pf-web').onclick = web(false); sh.querySelector('#pf-webnew').onclick = web(true);
     sh.querySelector('#pf-addvit').onclick = () => { vits.push({id: uid(), name:'', times:['09:00']}); drawV(); };
