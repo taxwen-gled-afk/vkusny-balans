@@ -540,7 +540,7 @@ const inParty = (s, id) => partyItems().some(x => x.s === s && x.id === id);
 // правка праздника — отдельной операцией: сервер применяет её к свежим данным
 function partyOp(op, extra){
   const p = D.party || {id: '', title: '', date: '', guests: 0, items: []}, x = extra || {};
-  if (op === 'meta') Object.assign(p, x);                                    // сразу показываем, сервер пришлёт точную версию
+  if (op === 'meta') { if (x.guests && p.guests && x.guests !== p.guests) p.items = p.items.map(i => i.s === 'm' && i.x === p.guests ? {...i, x: x.guests} : i); Object.assign(p, x); }                                    // сразу показываем, сервер пришлёт точную версию
   else if (op === 'add') p.items = [...p.items, {s: x.s, id: x.id2, x: x.x}];
   else if (op === 'set') p.items = p.items.map(i => i.s === x.s && i.id === x.id2 ? {...i, x: x.x} : i);
   else if (op === 'del') p.items = p.items.filter(i => !(i.s === x.s && i.id === x.id2));
@@ -550,7 +550,8 @@ function partyOp(op, extra){
 function toParty(s, id){
   if (inParty(s, id)) return toast('Уже в нашем столе');
   const p = D.party || {guests: 0};
-  partyOp('add', {s, id2: id, x: s === 'm' && myById(id).kind === 'drink' ? Math.max(1, p.guests || 2) : 1}).then(() => toast('Добавлено в наш стол'));
+  // своё блюдо и напиток — по порции (бокалу) на гостя; блюдо из книги — один рецепт
+  partyOp('add', {s, id2: id, x: s === 'm' ? Math.max(1, p.guests || 2) : 1}).then(() => toast('Добавлено в наш стол' + (s === 'm' && !p.guests ? ': на 2 гостей, число гостей можно поменять' : '')));
 }
 // ккал позиции: своё — по порциям; из книги калорийность неизвестна
 const itemKcal = x => x.s === 'm' && x.ref.k100 && x.ref.por ? x.ref.k100 * x.ref.por / 100 * x.x : null;
@@ -583,7 +584,7 @@ function partyScr(){
       </section>
       ${items.length ? `<section class="card"><h3>Меню стола</h3>${items.map(x => `<div class="meal"><div class="sp">
           <button class="linkish nm" type="button" ${x.s === 'b' ? `data-fdish="${x.id}"` : `data-myfest="${esc(x.id)}"`}>${x.s === 'm' && x.ref.kind === 'drink' ? '🥂 ' : ''}${esc(x.ref.n)}</button>
-          <div class="small muted">${x.s === 'b' ? 'рецепт ×' + num1(x.x) : (x.ref.kind === 'drink' ? 'бокалов: ' : 'порций: ') + num1(x.x)}${itemKcal(x) != null ? ' · ' + fmt(itemKcal(x)) + ' ккал' : ''}</div></div>
+          <div class="small muted">${x.s === 'b' ? 'рецепт ×' + num1(x.x) : (x.ref.kind === 'drink' ? 'бокалов: ' + num1(x.x) + (x.ref.por ? ' · ≈ ' + fmt(x.ref.por * x.x) + ' мл' : '') : 'порций: ' + num1(x.x) + (x.ref.por ? ' · ≈ ' + fmt(x.ref.por * x.x) + ' г' : ''))}${itemKcal(x) != null ? ' · ' + fmt(itemKcal(x)) + ' ккал' : ''}</div></div>
           <span class="row" style="gap:4px"><button class="btn ghost sm" type="button" aria-label="Меньше" data-pk="${x.s}|${esc(x.id)}" data-dir="-1">−</button><button class="btn ghost sm" type="button" aria-label="Больше" data-pk="${x.s}|${esc(x.id)}" data-dir="1">+</button><button class="x-del" type="button" aria-label="Убрать из стола" data-pk="${x.s}|${esc(x.id)}" data-dir="0">×</button></span></div>`).join('')}
         ${kn.length ? `<div class="small"><b>Свои блюда и напитки:</b> ${fmt(kn.reduce((a, b) => a + b, 0))} ккал на всех${p.guests ? ', ≈ ' + fmt(kn.reduce((a, b) => a + b, 0)/p.guests) + ' на гостя' : ''}. У блюд из книги калорийность не указана.</div>` : ''}</section>
         <div class="row"><h3 class="sp">Покупки к празднику</h3>${sh.map.size ? `<span class="state">${got} из ${sh.map.size}</span>` : ''}</div>
@@ -609,16 +610,24 @@ function quickDiary(name, k100, amount, unit){
       save('extra', {id: e.id, name, grams: e.grams, kcal: e.kcal}, 'Добавлено: ' + name).catch(() => { D.diary = D.diary.filter(x => x !== e); render(); }); };
   });
 }
+// Средняя калорийность напитков на 100 мл (таблицы химсостава продуктов) и обычный объём порции
+const HINT_DRINK = 'Калорийность в списке — средняя по таблицам; если на этикетке другая, впишите её.';
+const HINT_DISH = 'Калорийность на 100 г готового блюда. Порция × число гостей — сколько приготовить.';
+const DRINKS = [['Вино сухое (красное, белое)',68,150],['Вино полусухое',78,150],['Вино полусладкое',88,150],['Вино десертное, крепкое',150,100],
+  ['Игристое брют',70,120],['Игристое полусладкое',88,120],['Водка',235,50],['Коньяк',239,50],['Виски',235,50],['Ром',231,50],['Джин',231,50],['Текила',231,50],
+  ['Ликёр сливочный',327,50],['Вермут, мартини',150,100],['Пиво светлое',43,500],['Пиво тёмное',48,500],['Пиво безалкогольное',27,500],['Сидр',47,330],
+  ['Глинтвейн',120,200],['Сок',45,200],['Морс',40,200],['Газировка сладкая',42,330],['Компот',60,200],['Вода минеральная',0,250]];
 function myFestSheet(id){
   const f = id ? myById(id) : {id: uid(), kind: 'dish', n: '', k100: 0, por: 0, s: [], rec: ''};
   let kind = f.kind;
   sheet(`<h2>${id ? esc(f.n) : 'Своё блюдо или напиток'}</h2>
     <div class="seg" id="mf-kind"><button type="button" aria-pressed="${kind === 'dish'}" data-kind="dish">Блюдо</button><button type="button" aria-pressed="${kind === 'drink'}" data-kind="drink">Напиток</button></div>
+    <div class="field" id="mf-dw" ${kind === 'drink' ? '' : 'hidden'}>Выбрать напиток<select id="mf-d"><option value="">— свой вариант —</option>${DRINKS.map(([n, k], i) => `<option value="${i}">${esc(n)} · ${k} ккал/100 мл</option>`).join('')}</select></div>
     <div class="field">Название<input id="mf-n" type="text" value="${esc(f.n)}" placeholder="Брускетта с томатами, вино красное сухое…"></div>
     <div class="row"><div class="field sp"><span id="mf-kl">${kind === 'drink' ? 'ккал на 100 мл' : 'ккал на 100 г'}</span><input id="mf-k" type="number" inputmode="decimal" value="${f.k100 || ''}"></div>
       <div class="field sp"><span id="mf-pl">${kind === 'drink' ? 'Бокал, мл' : 'Порция, г'}</span><input id="mf-p" type="number" inputmode="numeric" value="${f.por || ''}"></div>
       <div class="field sp" id="mf-ow" ${kind === 'drink' ? 'hidden' : ''}>Весь рецепт, г<input id="mf-o" type="number" inputmode="numeric" value="${f.out || ''}" placeholder="1000"></div></div>
-    <div class="small muted">Подсказка: сухое вино ≈ 70–85 ккал на 100 мл, игристое брют ≈ 70, водка ≈ 230, сок ≈ 45.</div>
+    <div class="small muted" id="mf-hint">${kind === 'drink' ? HINT_DRINK : HINT_DISH}</div>
     <div class="field" id="mf-sw" ${kind === 'drink' ? 'hidden' : ''}>Продукты на весь рецепт, по строке<textarea id="mf-s" rows="4" placeholder="багет 1 шт&#10;помидоры 300 г">${esc((f.s || []).join('\n'))}</textarea></div>
     <div class="field">Рецепт или заметка<textarea id="mf-r" rows="3">${esc(f.rec || '')}</textarea></div>
     <button class="btn full" type="button" id="mf-save">Сохранить</button>
@@ -627,7 +636,10 @@ function myFestSheet(id){
     sh.querySelector('#mf-kind').addEventListener('click', e => { const b = e.target.closest('[data-kind]'); if (!b) return; kind = b.dataset.kind;
       sh.querySelectorAll('[data-kind]').forEach(x => x.setAttribute('aria-pressed', x === b));
       sh.querySelector('#mf-kl').textContent = kind === 'drink' ? 'ккал на 100 мл' : 'ккал на 100 г'; sh.querySelector('#mf-pl').textContent = kind === 'drink' ? 'Бокал, мл' : 'Порция, г';
-      sh.querySelector('#mf-sw').hidden = sh.querySelector('#mf-ow').hidden = kind === 'drink'; });
+      sh.querySelector('#mf-sw').hidden = sh.querySelector('#mf-ow').hidden = kind === 'drink'; sh.querySelector('#mf-dw').hidden = kind !== 'drink';
+      sh.querySelector('#mf-hint').textContent = kind === 'drink' ? HINT_DRINK : HINT_DISH; });
+    sh.querySelector('#mf-d').addEventListener('change', e => { const d = DRINKS[+e.target.value]; if (!e.target.value || !d) return;
+      sh.querySelector('#mf-n').value = d[0]; sh.querySelector('#mf-k').value = d[1]; sh.querySelector('#mf-p').value = d[2]; });
     sh.querySelector('#mf-save').onclick = () => { const it = {id: f.id, kind, n: v('#mf-n').trim(), k100: +v('#mf-k') || 0, por: +v('#mf-p') || 0, out: kind === 'drink' ? 0 : +v('#mf-o') || 0,
         s: v('#mf-s').split('\n').map(x => x.trim()).filter(Boolean), rec: v('#mf-r')};
       if (!it.n) return toast('Впишите название');
