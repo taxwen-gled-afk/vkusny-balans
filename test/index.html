@@ -695,7 +695,7 @@ function parseLine(line){
 const QTY = /\d+(?:[.,]\d+)?\s*(кг|мл|г|л|шт|ст|ч)(?![а-яё])/i;
 const CONT = /(?:^|\s)(из|и|с|со|в|во|на|для|или|либо|от|к|без|по|а|но)$|[,–(-]$/i;
 // водяные знаки распознанных PDF («Телеграм-канал - @…», «© @…|») — на случай, если остались в таблице
-const noWM = t => String(t).replace(/Телеграм[-\s]*канал\s*[-–:]?|(?:t\.me|telegram\.me)\/\S+|(^|[^\w.])@[A-Za-z0-9_]{3,}|©|\s\|\s?/gi, '$1 ').replace(/\s{2,}/g, ' ').replace(/^[|\s]+|[|\s]+$/g, '');
+const noWM = t => String(t).replace(/©/g, ' ').replace(/Телеграм[-\s]*канал\s*[-–:]?|(?:t\.me|telegram\.me)\/\S+|(^|[^\w.])@[A-Za-z0-9_]{3,}|©|\s\|\s?/gi, '$1 ').replace(/\s{2,}/g, ' ').replace(/^[|\s]+|[|\s]+$/g, '');
 function joinBroken(lines){
   const out = [];
   (lines || []).forEach(l => { const t = noWM(l); if (!t) return;
