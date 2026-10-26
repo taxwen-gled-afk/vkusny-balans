@@ -183,6 +183,7 @@ h3{margin:0;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:u
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 
 [hidden]{display:none!important}
+.qty-in{width:72px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font:inherit;font-size:14px}
 .tbl{width:148px}
 .tbl .tn{hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}   /* «Средиземноморский» не влезал в карточку */   /* .field{display:flex} иначе перебивает атрибут hidden */
 /* полноэкранный режим внутри Telegram */
@@ -313,6 +314,11 @@ function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px">
 const uniqById = list => (list || []).filter((x, i, a) => a.findIndex(y => y.id === x.id) === i);   // первая, как find на сервере
 function afterBoot(){
   D.myfest = uniqById(D.myfest);
+  // началась новая пара дней — списываем из запаса то, что уйдёт на её блюда (сервер делает это один раз на пару)
+  if ((D.pantry || []).length && !(D.consumed || []).includes(D.blocks[0])) {
+    const n = blockNeeds(0), items = [...n.map.entries()].filter(([, it]) => !it.raw).map(([key, it]) => ({key, qty: Math.round(it.q * 10) / 10}));
+    save('consume', {block: D.blocks[0], items}).then(r => { D.pantry = r.pantry; D.consumed = r.consumed; render(); }).catch(() => {});
+  }
   if (D.env === 'test') { document.title = 'ТЕСТ · Вкусный баланс'; const sm = document.querySelector('.tgbar .ttl small'); sm.textContent = 'ТЕСТ'; sm.title = 'Тестовая версия'; }
   render();
   const me = myProfile();
@@ -752,20 +758,64 @@ function shopBuild(sources){
 }
 const showQ = it => it.raw ? 'по вкусу' : it.u === 'шт' ? Math.ceil(it.q) + ' шт' : it.u === 'зуб.' ? Math.ceil(it.q) + ' ' + plural(Math.ceil(it.q), 'зубчик', 'зубчика', 'зубчиков') : /л\.$/.test(it.u) ? String(Math.round(it.q*2)/2).replace('.', ',') + ' ' + it.u : it.u === 'г' && it.q >= 1000 ? (it.q/1000).toFixed(1).replace('.',',') + ' кг' : it.u === 'мл' && it.q >= 1000 ? (it.q/1000).toFixed(1).replace('.',',') + ' л' : Math.round(it.q/10)*10 + ' ' + it.u;
 // attr — data-атрибут кнопки: data-buy (двухдневка) или data-pbuy (праздник)
-function shopListHTML({groups}, block, attr){
-  return groups.filter(g => g[1].length).map(([c, arr]) => `<section class="card"><h3>${c}</h3>${arr.map(([key, it]) => { const b = D.shop[block + '|' + key];
-    return `<div class="shop"><button class="chk" type="button" aria-pressed="${!!b}" aria-label="${esc(it.name)}" ${attr}="${esc(key)}"><svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5"/></svg></button><span class="sp ${b ? 'done-t' : ''}">${esc(it.name)}${b ? ` <span class="by">· ${esc(b)}</span>` : ''}</span><span class="q">${showQ(it)}</span></div>`; }).join('')}</section>`).join('');
+// avail(key) — сколько этого продукта есть дома для этой пары; тогда купить нужно только разницу
+function shopListHTML({groups}, block, attr, avail){
+  return groups.filter(g => g[1].length).map(([c, arr]) => `<section class="card"><h3>${c}</h3>${arr.map(([key, it]) => {
+    const b = D.shop[block + '|' + key], home = avail && !it.raw ? Math.min(avail(key), it.q) : 0, need = {...it, q: Math.max(0, it.q - home)}, got = D.shopQty && D.shopQty[block + '|' + key];
+    return `<div class="shop"><button class="chk" type="button" aria-pressed="${!!b}" aria-label="${esc(it.name)}" ${attr}="${esc(key)}"><svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5"/></svg></button>
+      <span class="sp ${b ? 'done-t' : ''}">${esc(it.name)}${perish(it.name) ? ' <span class="tag" title="Быстро портится">⏳</span>' : ''}${b ? ` <span class="by">· ${esc(b)}</span>` : ''}
+        ${home ? `<br><span class="small muted">дома ${showQ({...it, q: home})}${need.q ? '' : ' — хватает'}</span>` : ''}
+        ${b && !it.raw ? `<br><label class="small muted">купили <input class="qty-in" type="number" inputmode="decimal" min="0" value="${got != null ? got : Math.round(need.q)}" data-bq="${esc(key)}" data-battr="${attr}" aria-label="Сколько купили, ${esc(it.u)}"> ${esc(it.u)}</label>` : ''}</span>
+      <span class="q">${home && !need.q ? '✓' : showQ(need)}</span></div>`; }).join('')}</section>`).join('');
+}
+// продукты, которые быстро портятся: их запас показываем первым и подсказываем блюда с ними
+const PERISH = /(творог|фарш|филе|(?:^|[^а-яё])кур(?:иц|ин|оч|ят)|индей|рыб|треск|форел|с[её]мг|лосос|креветк|мяс|говяд|свин|печ[её]н|сердеч|молок|кефир|ряженк|сметан|йогурт|сливк|творожн|зелен|укроп|петруш|кинз|салат|шпинат|ягод|клубник|шампин|гриб)/i;
+const perish = name => PERISH.test(name);
+// что нужно на пару дней bi по плану
+const blockNeeds = bi => shopBuild(TYPES.map(([t]) => { const sl = slotOf(bi, t), d = sl && byId(sl.id); return d ? {lines: d.s, f: cookFactor(d, factor(sl))} : null; }).filter(Boolean));
+const stock = key => { const p = (D.pantry || []).find(x => x.key === key); return p ? p.qty : 0; };
+// запас для пары bi: то, что есть дома, минус нужное на ещё не приготовленные пары до неё
+function availFor(bi){
+  const before = [...Array(bi).keys()].filter(j => !(D.consumed || []).includes(D.blocks[j])).map(blockNeeds);
+  return key => Math.max(0, stock(key) - before.reduce((a, n) => a + ((n.map.get(key) || {}).q || 0), 0));
 }
 function shopScr(){
-  const block = D.blocks[S.block];
-  const sh = shopBuild(TYPES.map(([t]) => { const sl = slotOf(S.block, t), d = sl && byId(sl.id); return d ? {lines: d.s, f: cookFactor(d, factor(sl))} : null; }).filter(Boolean));
+  const block = D.blocks[S.block], sh = blockNeeds(S.block), av = availFor(S.block);
   const map = sh.map, got = [...map.keys()].filter(k => D.shop[block + '|' + k]).length;
+  const pantry = (D.pantry || []).slice().sort((a, b) => perish(b.name) - perish(a.name) || a.name.localeCompare(b.name));
   scr.innerHTML = `
   <div class="row"><h2 class="sp">Покупки</h2>${map.size ? `<span class="state">${got} из ${map.size}</span>` : ''}</div>
   <div class="seg">${D.blocks.map((b,i) => `<button type="button" aria-pressed="${i === S.block}" data-block="${i}">${blockLabel(i).short}</button>`).join('')}</div>
-  <div class="factor"><span class="sp">${blockLabel(S.block).long}. Пересчитано на тех, кто ест каждое блюдо, на 2 дня.${S.block === 1 && D.today !== D.blocks[0] ? ' Покупаем сегодня, готовим завтра.' : ''}</span></div>
-  ${map.size ? shopListHTML(sh, block, 'data-buy')
-  : '<section class="card small muted">Выберите блюда во вкладке «План», и здесь появится список продуктов.</section>'}`;
+  <div class="factor"><span class="sp">${blockLabel(S.block).long}. Пересчитано на тех, кто ест каждое блюдо, на 2 дня.${S.block === 1 && D.today !== D.blocks[0] ? ' Покупаем сегодня, готовим завтра.' : ''} Отметив покупку, впишите, сколько купили на самом деле: остаток попадёт в «Есть дома».</span></div>
+  ${map.size ? shopListHTML(sh, block, 'data-buy', av)
+  : '<section class="card small muted">Выберите блюда во вкладке «План», и здесь появится список продуктов.</section>'}
+  <section class="card"><div class="row"><h3 class="sp">🧺 Есть дома</h3><button class="btn sm ghost" type="button" data-act="addpantry">+ Добавить</button></div>
+    ${pantry.length ? pantry.map(x => `<div class="shop"><span class="sp">${esc(x.name)}${perish(x.name) ? ' <span class="tag">⏳ быстро портится</span>' : ''}</span>
+      <input class="qty-in" type="number" inputmode="decimal" min="0" value="${x.qty}" data-pq="${esc(x.key)}" aria-label="Сколько дома, ${esc(x.unit)}"> <span class="small muted">${esc(x.unit)}</span>
+      <button class="x-del" type="button" aria-label="Убрать ${esc(x.name)}" data-pdel2="${esc(x.key)}">×</button></div>`).join('')
+    : '<p class="small muted" style="margin:0">Пусто. Добавьте, что уже лежит дома, — приложение вычтет это из покупок и подскажет блюда, чтобы ничего не пропало.</p>'}
+  </section>`;
+}
+function pantrySheet(){
+  sheet(`<h2>Есть дома</h2>
+    <div class="field">Продукт<input id="pa-n" type="text" placeholder="Например, рис или творог 5%"></div>
+    <div class="row"><div class="field sp">Сколько<input id="pa-q" type="number" inputmode="decimal" min="0"></div>
+      <div class="field sp">Единица<select id="pa-u"><option>г</option><option>шт</option><option>мл</option></select></div></div>
+    <button class="btn full" type="button" id="pa-save">Добавить</button>`, sh => {
+    sh.querySelector('#pa-save').onclick = () => { const name = sh.querySelector('#pa-n').value.trim(), q = parseFloat(sh.querySelector('#pa-q').value.replace(',', '.')) || 0, u = sh.querySelector('#pa-u').value;
+      if (!name || !q) return toast('Впишите продукт и количество');
+      const it = parseLine(name), key = (shopKey(it.name) + '|' + u).slice(0, 90);
+      close(); save('pantry', {op: 'set', key, name: it.name, unit: u, qty: q + stock(key)}, 'Добавлено: ' + it.name).then(list => { D.pantry = list; render(); }); };
+  });
+}
+// при выборе блюда — что из запаса оно использует и что придётся докупить
+function pantryFit(d, bi, sl, av){
+  if (!(D.pantry || []).length) return null;
+  av = av || availFor(bi); const need = shopBuild([{lines: d.s, f: cookFactor(d, sl ? factor(sl) : familyFactor())}]).map;
+  let score = 0; const use = [], buy = [];
+  need.forEach((it, key) => { if (it.raw) return; const h = Math.min(av(key), it.q);
+    if (h > 0) { score += (h / it.q) * (perish(it.name) ? 3 : 1); use.push(it.name + ' ' + showQ({...it, q: h})); if (it.q > h) buy.push(it.name + ' ' + showQ({...it, q: it.q - h})); } });
+  return score ? {score, use, buy} : null;
 }
 
 function sweetScr(){
@@ -875,10 +925,14 @@ function swapSheet(t){
   const cur = slotOf(S.block, t); let f = 0;
   const menus = [...new Set(D.catalog.dishes.map(d => d.m))].sort((a,b) => a-b);
   const draw = sh => {
-    sh.querySelector('#swapList').innerHTML = D.catalog.dishes.filter(d => d.t === t && (!f || d.m === f)).sort((a, b) => voteScore(b.id) - voteScore(a.id)).map(d => `<button class="dish" type="button" data-pick="${d.id}" ${cur && d.id === cur.id ? 'style="border-color:var(--basil)"' : ''}><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}</span></span><span class="kc num">${d.k}</span></button>`).join('');
+    const av = (D.pantry || []).length ? availFor(S.block) : null;   // запас считаем один раз на весь список
+    const fit = new Map(D.catalog.dishes.filter(d => d.t === t && (!f || d.m === f)).map(d => [d, av && pantryFit(d, S.block, cur, av)]));
+    sh.querySelector('#swapList').innerHTML = [...fit.keys()].sort((a, b) => ((fit.get(b) || {}).score || 0) - ((fit.get(a) || {}).score || 0) || voteScore(b.id) - voteScore(a.id)).map(d => { const ft = fit.get(d);
+      return `<button class="dish" type="button" data-pick="${d.id}" ${cur && d.id === cur.id ? 'style="border-color:var(--basil)"' : ''}><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}</span>
+        ${ft ? `<br><span class="small" style="color:var(--basil)">🧺 из запаса: ${esc(ft.use.join(', '))}</span>${ft.buy.length ? `<br><span class="small muted">докупить: ${esc(ft.buy.join(', '))}</span>` : ''}` : ''}</span><span class="kc num">${d.k}</span></button>`; }).join('');
     sh.querySelectorAll('[data-sf]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.sf === f));
   };
-  sheet(`<h2>${TNAME[t]} на ${blockLabel(S.block).short}</h2><div class="small muted">Выберите блюдо из любого меню</div>
+  sheet(`<h2>${TNAME[t]} на ${blockLabel(S.block).short}</h2><div class="small muted">Выберите блюдо из любого меню${(D.pantry || []).length ? '. Сверху — блюда из того, что есть дома' : ''}</div>
     <div class="chips">${[0,...menus].map(m => `<button type="button" data-sf="${m}">${m ? menuName(m) : 'Все'}</button>`).join('')}</div>
     <div class="list" id="swapList"></div>`, sh => {
     draw(sh);
@@ -1078,8 +1132,10 @@ scr.addEventListener('click', e => {
   else if (d.tbl != null) { const tb = scr.querySelector('.tables'), x = tb ? tb.scrollLeft : 0, y = scr.scrollTop;   // не откидывать в начало
     S.tbl = +d.tbl; render(); const nt = scr.querySelector('.tables'); if (nt) nt.scrollLeft = x; scr.scrollTop = y; }
   else if (d.fdish != null) festSheet(+d.fdish);
-  else if (d.buy) { const block = D.blocks[S.block], k = block + '|' + d.buy, on = !D.shop[k];
-    D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.buy, on}).then(by => { D.shop[k] = by || null; render(); }); }
+  else if (d.buy) { const block = D.blocks[S.block], k = block + '|' + d.buy, on = !D.shop[k], it = blockNeeds(S.block).map.get(d.buy);
+    const qty = on && it && !it.raw ? Math.round(Math.max(0, it.q - Math.min(availFor(S.block)(d.buy), it.q))) : 0;   // по умолчанию купили ровно недостающее
+    D.shop[k] = on ? myProfile().name : null; (D.shopQty = D.shopQty || {})[k] = on ? qty : null; render();
+    save('buy', {block, key: d.buy, on, qty, name: it && it.name, unit: it && it.u}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
   else if (d.act === 'newsweet') newSweetSheet();
   else if (d.act === 'body') bodySheet();
   else if (d.sip) sipSheet(d.sip);
@@ -1091,11 +1147,19 @@ scr.addEventListener('click', e => {
     const step = sv === 'b' ? .5 : 1; partyOp('set', {s: sv, id2, x: Math.max(step, it.x + dir*step)}); }
   else if (d.act === 'newparty') partyOp('new').then(() => toast('Новый праздник'));
   else if (d.pbuy) { const block = 'P:' + D.party.id, k = block + '|' + d.pbuy, on = !D.shop[k];
-    D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.pbuy, on}).then(by => { D.shop[k] = by || null; render(); }); }
+    D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.pbuy, on}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
+  else if (d.act === 'addpantry') pantrySheet();
+  else if (d.pdel2) { D.pantry = D.pantry.filter(x => x.key !== d.pdel2); render(); save('pantry', {op: 'del', key: d.pdel2}).then(list => { D.pantry = list; render(); }); }
   else if (d.act === 'shift') { toast('Сдвигаю…'); save('shift', {shift: D.shift ? 0 : 1}).then(nd => { nd.catalog.desserts = nd.catalog.desserts || []; D = nd; S.block = 0; render(); toast('Готово: ' + blockLabel(0).short + ', план перенесён'); }); }
   else if (d.sweet != null) dessertSheet(+d.sweet);
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+// количество: «купили N» у позиции покупок и «сколько дома» в запасе
+document.addEventListener('change', e => { const t = e.target, d = t.dataset || {}; if (!D) return;
+  if (d.bq) { const block = D.blocks[S.block], k = block + '|' + d.bq, it = blockNeeds(S.block).map.get(d.bq), qty = Math.max(0, parseFloat(String(t.value).replace(',', '.')) || 0);
+    (D.shopQty = D.shopQty || {})[k] = qty; save('buy', {block, key: d.bq, on: true, qty, name: it && it.name, unit: it && it.u}).then(r => { D.pantry = r.pantry; render(); }); }
+  else if (d.pq) { const x = D.pantry.find(p => p.key === d.pq), qty = Math.max(0, parseFloat(String(t.value).replace(',', '.')) || 0); if (!x) return;
+    save('pantry', {op: 'set', key: x.key, name: x.name, unit: x.unit, qty}).then(list => { D.pantry = list; render(); }); } });
 // ---------- выбор из списка на Android ----------
 // В Telegram на части Android-телефонов обычный <select> не раскрывается. Показываем свой список поверх экрана,
 // выбор записываем в тот же <select> и шлём change — остальной код ничего не замечает.
@@ -1118,7 +1182,7 @@ document.addEventListener('pointerdown', e => { const sel = e.target.closest && 
 ['mousedown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.target.closest && e.target.closest('select') && customSelect()) e.preventDefault(); }, true));
 
 // для локальной проверки сборки (tools/smoke.js); в Telegram __smoke не задан
-if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
+if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, swapSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
 start();
 })();
 
