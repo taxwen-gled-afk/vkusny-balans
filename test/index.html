@@ -387,8 +387,8 @@ function today(){
   <section class="card">
     <div class="row"><h3 class="sp">Приёмы пищи</h3>${p.diary ? '<button class="btn sm ghost" type="button" data-act="add">+ Добавить</button>' : ''}</div>
     ${items.map(it => !it.d ? `<div class="meal"><div class="sp"><div class="tp">${TNAME[it.t]}</div><div class="small muted">Не выбрано в плане</div></div><button class="btn sm ghost" type="button" data-goplan="1">В план</button></div>` :
-      `<div class="meal"><div class="sp"><div class="tp">${TNAME[it.t]}</div><button class="linkish nm" type="button" data-dish="${it.d.id}">${esc(it.d.n)}</button><div class="small muted"><span class="tag">${menuName(it.d.m)}</span>${fmt(it.d.k*n.k)} ккал</div>${portionFor(it.d, n.k) ? `<div class="small muted">Ваша порция: ${esc(portionFor(it.d, n.k))}</div>` : ''}</div>
-      ${!p.diary ? '' : it.mine ? `<button class="eat" type="button" aria-pressed="${it.on}" data-eat="${it.t}">${it.on ? 'Съедено ✓' : 'Съедено'}</button>` : '<span class="small muted">не ест</span>'}</div>`).join('')}
+      `<div class="meal"><div class="sp"><div class="tp">${TNAME[it.t]}</div><button class="linkish nm" type="button" data-dish="${it.d.id}">${esc(it.d.n)}</button><div class="small muted"><span class="tag">${menuName(it.d.m)}</span>${fmt(it.d.k*n.k)} ккал</div>${portionFor(it.d, n.k) ? `<div class="small muted">Ваша порция: ${esc(portionFor(it.d, n.k))}</div>` : ''}${familyGrams(it.d, slotOf(0, it.t))}</div>
+      ${!p.diary ? '' : `<span class="row" style="gap:6px;flex-direction:column;align-items:flex-end">${it.mine ? `<button class="eat" type="button" aria-pressed="${it.on}" data-eat="${it.t}">${it.on ? 'Съедено ✓' : 'Съедено'}</button>` : '<span class="small muted">не ест</span>'}<button class="btn ghost sm" type="button" data-sip="${it.t}" aria-label="Чай или кофе к приёму">☕ +</button></span>`}</div>`).join('')}
     ${extras.map(e => `<div class="meal"><div class="sp"><div class="tp">Дополнительно</div><div class="nm">${esc(e.name)}</div><div class="small muted">${e.grams ? esc(e.grams) + ' г · ' : ''}${fmt(e.kcal)} ккал</div></div><button class="x-del" type="button" aria-label="Убрать" data-del="${esc(e.id)}">×</button></div>`).join('')}
   </section>
   ${p.water > 0 ? `<section class="card">
@@ -413,6 +413,36 @@ function shiftHint(){
   const wd = x => x.toLocaleDateString('ru-RU', {weekday:'short', timeZone:'UTC'});
   return wd(d) + '–' + wd(e) + ' вместо ' + blockLabel(0).short;
 }
+// ---------- чай, кофе, какао к приёму пищи ----------
+// ккал на 100 мл без сахара и молока; молоко 2,5% — 52 ккал/100 мл, сахар — 20 ккал в чайной ложке
+const SIPS = [['Кофе чёрный',2,true],['Кофе с молоком',2,true],['Чай чёрный',1,false],['Чай зелёный',1,false],['Чай фруктовый',3,false],['Какао на молоке',59,false]];
+function sipSheet(t){
+  let i = 0;
+  sheet(`<h2>Напиток к приёму: ${TNAME[t].toLowerCase()}</h2>
+    <div class="seg" id="sp-k" style="flex-wrap:wrap">${SIPS.map(([n], j) => `<button type="button" aria-pressed="${j === 0}" data-sk="${j}">${n}</button>`).join('')}</div>
+    <div class="row"><div class="field sp">Объём, мл<input id="sp-v" type="number" inputmode="numeric" value="200"></div>
+      <div class="field sp" id="sp-mw">Молоко, мл<input id="sp-m" type="number" inputmode="numeric" value="0"></div>
+      <div class="field sp">Сахар, ч. л.<input id="sp-s" type="number" inputmode="numeric" value="0" min="0"></div></div>
+    <div class="row"><span class="sp muted">Это</span><span class="big num" id="sp-kc"></span><span class="muted">ккал</span></div>
+    <button class="btn full" type="button" id="sp-add">Добавить в дневник</button>`, sh => {
+    const v = q => +sh.querySelector(q).value || 0;
+    const calc = () => { const [, k, milk] = SIPS[i]; sh.querySelector('#sp-mw').hidden = !milk;
+      return k * v('#sp-v') / 100 + (milk ? v('#sp-m') * .52 : 0) + v('#sp-s') * 20; };
+    const upd = () => sh.querySelector('#sp-kc').textContent = fmt(calc());
+    sh.addEventListener('input', upd);
+    sh.querySelector('#sp-k').addEventListener('click', e => { const b = e.target.closest('[data-sk]'); if (!b) return; i = +b.dataset.sk;
+      sh.querySelectorAll('[data-sk]').forEach(x => x.setAttribute('aria-pressed', x === b));
+      if (SIPS[i][0] === 'Кофе с молоком' && !v('#sp-m')) sh.querySelector('#sp-m').value = 50;
+      if (SIPS[i][0] === 'Кофе чёрный') sh.querySelector('#sp-m').value = 0; upd(); });
+    upd();
+    sh.querySelector('#sp-add').onclick = () => { const [n, , milk] = SIPS[i], kc = calc();
+      const name = n + ' ' + v('#sp-v') + ' мл' + (milk && v('#sp-m') ? ', молоко ' + v('#sp-m') + ' мл' : '') + (v('#sp-s') ? ', сахар ' + v('#sp-s') + ' ч. л.' : '') + ' (' + TNAME[t].toLowerCase() + ')';
+      const e = {id: uid(), kind: 'extra', ref: '', name, grams: '', kcal: kc, p: [0,0,0]};
+      D.diary.push(e); close(); render();
+      save('extra', {id: e.id, name, grams: '', kcal: kc}, 'Добавлено: ' + n).catch(() => { D.diary = D.diary.filter(x => x !== e); render(); }); };
+  });
+}
+
 // ---------- вес и замеры ----------
 const BODY = [['weight','Вес','кг'],['waist','Талия','см'],['hips','Бёдра','см'],['chest','Грудь','см'],['belly','Живот','см']];
 const num1 = x => String(Math.round(x*10)/10).replace('.', ',');
@@ -507,6 +537,7 @@ function planScr(){
   <h2>План готовки</h2>
   <div class="seg">${D.blocks.map((b,i) => `<button type="button" aria-pressed="${i === S.block}" data-block="${i}">${blockLabel(i).short}</button>`).join('')}</div>
   <div class="small muted">${bl.long} · готовим один раз на два дня</div>
+  ${planOver(S.block).map(o => `<div class="state r">Перебор: ${esc(o.name)} — ${fmt(o.kcal)} ккал в день при норме ${fmt(o.target)} (+${fmt(o.kcal - o.target)})</div>`).join('')}
   <div class="row small"><span class="sp muted">Готовите в другие дни? Например, ${shiftHint()}</span><button class="btn ghost sm" type="button" data-act="shift">Сдвинуть на день</button></div>
   ${TYPES.map(([t, name]) => { const sl = slotOf(S.block, t), d = sl && byId(sl.id), f = factor(sl), skip = sl ? sl.skip : [];
     return `<section class="card pcard">
@@ -783,9 +814,23 @@ function portionFor(d, f){
   if (!/\d\s*г(?![а-яё])/i.test(first)) return '';
   return first.replace(/(\d+(?:[.,]\d+)?)\s*г(?![а-яё])/gi, (m, v) => fmt(Math.max(5, Math.round(parseFloat(v.replace(',', '.'))*f/5)*5)) + ' г');
 }
+// граммы порции одним числом (сумма всех «N г» из первой фразы «Порции по меню»)
+const portionG = (d, k) => { const t = portionFor(d, k); return t ? [...t.matchAll(/([\d\s ]+)\s*г(?![а-яё])/gi)].reduce((a, m) => a + (+m[1].replace(/\D/g, '') || 0), 0) : 0; };
+// порции всех, кто ест блюдо: «Юля ≈230 г · Андрей ≈260 г · Дети ≈105 г»
+function familyGrams(d, sl){
+  const who = members().filter(m => !sl || !skipped(sl.skip, m)); if (who.length < 2 || !portionG(d, 1)) return '';
+  return `<div class="small muted">${who.map(m => `${esc(m.name)} ≈${fmt(portionG(d, m.k))} г`).join(' · ')}</div>`;
+}
+// калорийность дня по плану для каждого взрослого: блюда из разных меню могут дать больше нормы
+function planOver(bi){
+  return D.profiles.map(p => { const n = norm(p); if (!n.target) return null;
+    const m = members().find(x => x.key === 'u:' + p.id);
+    const kcal = TYPES.reduce((a, [t]) => { const sl = slotOf(bi, t), d = sl && byId(sl.id); return a + (d && !skipped(sl.skip, m) ? d.k * n.k : 0); }, 0);
+    return kcal > n.target * 1.03 ? {name: p.name, kcal, target: n.target} : null; }).filter(Boolean);
+}
 // где блюдо стоит в плане: сначала выбранный блок
 function planSlotOf(id){
-  for (const b of [S.block, 0, 1, 2]) for (const [t] of TYPES) { const sl = slotOf(b, t); if (sl && sl.id === id) return sl; }
+  for (const b of [S.block, ...D.blocks.keys()]) for (const [t] of TYPES) { const sl = slotOf(b, t); if (sl && sl.id === id) return sl; }
   return null;
 }
 
@@ -823,7 +868,8 @@ function weightsHTML(d){
 function setDish(bi, t, id){
   const block = D.blocks[bi], cur = slotOf(bi, t);
   (D.plan[block] = D.plan[block] || {})[t] = {id, skip: cur ? cur.skip : []};
-  render(); save('plan', {block, type: t, dish_id: id}, TNAME[t] + ': ' + byId(id).n);
+  const over = planOver(bi);
+  render(); save('plan', {block, type: t, dish_id: id}, over.length ? '⚠ Перебор калорий: ' + over.map(o => o.name + ' +' + fmt(o.kcal - o.target)).join(', ') : TNAME[t] + ': ' + byId(id).n);
 }
 function swapSheet(t){
   const cur = slotOf(S.block, t); let f = 0;
@@ -1029,12 +1075,14 @@ scr.addEventListener('click', e => {
   else if (d.liked) { S.liked = !S.liked; render(); }
   else if (d.typef) { S.typeF = d.typef; render(); }
   else if (d.dish != null) dishSheet(+d.dish);
-  else if (d.tbl != null) { S.tbl = +d.tbl; render(); }
+  else if (d.tbl != null) { const tb = scr.querySelector('.tables'), x = tb ? tb.scrollLeft : 0, y = scr.scrollTop;   // не откидывать в начало
+    S.tbl = +d.tbl; render(); const nt = scr.querySelector('.tables'); if (nt) nt.scrollLeft = x; scr.scrollTop = y; }
   else if (d.fdish != null) festSheet(+d.fdish);
   else if (d.buy) { const block = D.blocks[S.block], k = block + '|' + d.buy, on = !D.shop[k];
     D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.buy, on}).then(by => { D.shop[k] = by || null; render(); }); }
   else if (d.act === 'newsweet') newSweetSheet();
   else if (d.act === 'body') bodySheet();
+  else if (d.sip) sipSheet(d.sip);
   else if (d.pv) { S.pv = d.pv; render(); }
   else if (d.act === 'newfest') myFestSheet(null);
   else if (d.myfest) myFestSheet(d.myfest);
@@ -1070,7 +1118,7 @@ document.addEventListener('pointerdown', e => { const sel = e.target.closest && 
 ['mousedown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.target.closest && e.target.closest('select') && customSelect()) e.preventDefault(); }, true));
 
 // для локальной проверки сборки (tools/smoke.js); в Telegram __smoke не задан
-if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
+if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
 start();
 })();
 
