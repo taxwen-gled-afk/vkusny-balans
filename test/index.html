@@ -308,7 +308,7 @@ function start(){
 function lum(hex){ const n = parseInt(hex.replace('#',''), 16); return ((n>>16&255)*.299 + (n>>8&255)*.587 + (n&255)*.114)/255; }
 function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px"><h2>Вкусный баланс</h2><p>${esc(msg)}</p></div>`; }
 // одна карточка на id, даже если строку в листе MyFestive импортировали дважды
-const uniqById = list => [...new Map((list || []).map(x => [x.id, x])).values()];
+const uniqById = list => (list || []).filter((x, i, a) => a.findIndex(y => y.id === x.id) === i);   // первая, как find на сервере
 function afterBoot(){
   D.myfest = uniqById(D.myfest);
   if (D.env === 'test') { document.title = 'ТЕСТ · Вкусный баланс'; const sm = document.querySelector('.tgbar .ttl small'); sm.textContent = 'ТЕСТ'; sm.title = 'Тестовая версия'; }
