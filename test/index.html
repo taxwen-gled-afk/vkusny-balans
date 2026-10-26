@@ -307,7 +307,10 @@ function start(){
 }
 function lum(hex){ const n = parseInt(hex.replace('#',''), 16); return ((n>>16&255)*.299 + (n>>8&255)*.587 + (n&255)*.114)/255; }
 function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px"><h2>Вкусный баланс</h2><p>${esc(msg)}</p></div>`; }
+// одна карточка на id, даже если строку в листе MyFestive импортировали дважды
+const uniqById = list => [...new Map((list || []).map(x => [x.id, x])).values()];
 function afterBoot(){
+  D.myfest = uniqById(D.myfest);
   if (D.env === 'test') { document.title = 'ТЕСТ · Вкусный баланс'; const sm = document.querySelector('.tgbar .ttl small'); sm.textContent = 'ТЕСТ'; sm.title = 'Тестовая версия'; }
   render();
   const me = myProfile();
@@ -645,12 +648,12 @@ function myFestSheet(id){
         s: v('#mf-s').split('\n').map(x => x.trim()).filter(Boolean), rec: v('#mf-r')};
       if (!it.n) return toast('Впишите название');
       D.myfest = [...(D.myfest || []).filter(x => x.id !== it.id), it]; close(); render();
-      save('myfest', it, 'Сохранено: ' + it.n).then(list => { D.myfest = list; render(); }); };
+      save('myfest', it, 'Сохранено: ' + it.n).then(list => { D.myfest = uniqById(list); render(); }); };
     if (!id) return;
     sh.querySelector('#mf-party').onclick = () => { close(); toParty('m', id); };
     sh.querySelector('#mf-del').onclick = () => { D.myfest = D.myfest.filter(x => x.id !== id);
       if (D.party && D.party.items.some(x => x.s === 'm' && x.id === id)) partyOp('del', {s: 'm', id2: id});
-      close(); render(); save('delMyfest', {id}, 'Удалено').then(list => { D.myfest = list; render(); }); };
+      close(); render(); save('delMyfest', {id}, 'Удалено').then(list => { D.myfest = uniqById(list); render(); }); };
     sh.querySelector('#mf-diary').onclick = () => { if (!f.k100) return toast('Сначала впишите калорийность');
       quickDiary(f.n, f.k100, f.por || 100, f.kind === 'drink' ? 'мл' : 'г'); };
   });
