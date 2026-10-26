@@ -182,6 +182,7 @@ h3{margin:0;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:u
 .example{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--yolk)}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 
+[hidden]{display:none!important}   /* .field{display:flex} иначе перебивает атрибут hidden */
 /* полноэкранный режим внутри Telegram */
 html,body{height:100%}
 body{padding:0!important}
@@ -540,7 +541,7 @@ const inParty = (s, id) => partyItems().some(x => x.s === s && x.id === id);
 // правка праздника — отдельной операцией: сервер применяет её к свежим данным
 function partyOp(op, extra){
   const p = D.party || {id: '', title: '', date: '', guests: 0, items: []}, x = extra || {};
-  if (op === 'meta') { if (x.guests && p.guests && x.guests !== p.guests) p.items = p.items.map(i => i.s === 'm' && i.x === p.guests ? {...i, x: x.guests} : i); Object.assign(p, x); }                                    // сразу показываем, сервер пришлёт точную версию
+  if (op === 'meta') { const old = p.guests || 2; if (x.guests && x.guests !== old) p.items = p.items.map(i => i.s === 'm' && i.x === old ? {...i, x: x.guests} : i); Object.assign(p, x); }                                    // сразу показываем, сервер пришлёт точную версию
   else if (op === 'add') p.items = [...p.items, {s: x.s, id: x.id2, x: x.x}];
   else if (op === 'set') p.items = p.items.map(i => i.s === x.s && i.id === x.id2 ? {...i, x: x.x} : i);
   else if (op === 'del') p.items = p.items.filter(i => !(i.s === x.s && i.id === x.id2));
