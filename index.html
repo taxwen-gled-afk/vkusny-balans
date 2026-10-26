@@ -193,8 +193,13 @@ body{padding:0!important}
 .tgbar .brand{display:flex;align-items:center;gap:8px;text-align:left;font-family:var(--display);font-weight:500;font-size:15px;white-space:nowrap;min-width:0}
 .brand-mark{height:32px;width:auto;flex:none}
 .brand-mark .bm-basil{fill:var(--basil)} .brand-mark .bm-yolk{fill:var(--yolk)}
-.tgbar .brand small{display:inline-block;margin-left:2px;font-family:inherit;font-size:10px;font-weight:800;color:var(--yolk)}
+.tgbar .brand{flex:1}
+.tgbar .brand>span{order:2;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* «ТЕСТ» — сразу за знаком, чтобы на узком экране обрезалось название, а не метка */
+.tgbar .brand small{order:1;flex:none;padding:2px 5px;border-radius:6px;background:var(--warn-soft);font-family:inherit;font-size:10px;font-weight:800;color:var(--warn)}
 .tgbar .brand small:empty{display:none}
+.tgbar .who{flex:none}
+@media (max-width:400px){ #whoName{display:none} .tgbar .who{padding-right:4px} }   /* на телефоне в кнопке профиля только кружок */
 </style>
 <link rel="icon" type="image/svg+xml" href="logo/svg/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="logo/png/favicon-32.png">
@@ -303,7 +308,7 @@ function start(){
 function lum(hex){ const n = parseInt(hex.replace('#',''), 16); return ((n>>16&255)*.299 + (n>>8&255)*.587 + (n&255)*.114)/255; }
 function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px"><h2>Вкусный баланс</h2><p>${esc(msg)}</p></div>`; }
 function afterBoot(){
-  if (D.env === 'test') { document.title = 'ТЕСТ · Вкусный баланс'; const sm = document.querySelector('.tgbar .ttl small'); sm.textContent = 'ТЕСТ'; sm.title = 'Тестовая версия'; sm.style.color = 'var(--warn)'; }
+  if (D.env === 'test') { document.title = 'ТЕСТ · Вкусный баланс'; const sm = document.querySelector('.tgbar .ttl small'); sm.textContent = 'ТЕСТ'; sm.title = 'Тестовая версия'; }
   render();
   const me = myProfile();
   if (!me.age || !me.height || !me.weight) { profileSheet(true); }
