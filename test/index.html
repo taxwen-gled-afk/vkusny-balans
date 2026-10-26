@@ -1050,7 +1050,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 const customSelect = () => { try { return (window.Telegram && Telegram.WebApp && Telegram.WebApp.platform === 'android') || /Android/i.test(navigator.userAgent); } catch (e) { return false; } };
 function pickFrom(sel){
   const ov = document.createElement('div'); ov.className = 'shade'; ov.style.zIndex = 30;
-  const label = (sel.closest('.field') && sel.closest('.field').firstChild && sel.closest('.field').firstChild.textContent || '').trim();
+  const fc = sel.closest('.field') && sel.closest('.field').firstChild;          // подпись — только текст перед списком
+  const label = fc && fc.nodeType === 3 ? fc.textContent.trim() : '';
   ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><span class="grab"></span>${label ? `<h3>${esc(label)}</h3>` : ''}
     <div class="list">${[...sel.options].map((o, i) => `<button class="dish" type="button" data-opt="${i}" aria-pressed="${o.selected}"${o.selected ? ' style="border-color:var(--basil)"' : ''}><span class="sp nm">${esc(o.text)}</span>${o.selected ? '<span class="kc">✓</span>' : ''}</button>`).join('')}</div></div>`;
   const opened = Date.now();
