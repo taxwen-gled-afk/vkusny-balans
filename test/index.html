@@ -182,7 +182,9 @@ h3{margin:0;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:u
 .example{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--yolk)}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 
-[hidden]{display:none!important}   /* .field{display:flex} иначе перебивает атрибут hidden */
+[hidden]{display:none!important}
+.tbl{width:148px}
+.tbl .tn{hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}   /* «Средиземноморский» не влезал в карточку */   /* .field{display:flex} иначе перебивает атрибут hidden */
 /* полноэкранный режим внутри Telegram */
 html,body{height:100%}
 body{padding:0!important}
@@ -692,9 +694,11 @@ function parseLine(line){
 // Строки, разорванные при распознавании PDF («…на ваш вкус) из» + «твердых сортов пшеницы»), склеиваем обратно
 const QTY = /\d+(?:[.,]\d+)?\s*(кг|мл|г|л|шт|ст|ч)(?![а-яё])/i;
 const CONT = /(?:^|\s)(из|и|с|со|в|во|на|для|или|либо|от|к|без|по|а|но)$|[,–(-]$/i;
+// водяные знаки распознанных PDF («Телеграм-канал - @…», «© @…|») — на случай, если остались в таблице
+const noWM = t => String(t).replace(/Телеграм[-\s]*канал\s*[-–:]?|(?:t\.me|telegram\.me)\/\S+|(^|[^\w.])@[A-Za-z0-9_]{3,}|©|\s\|\s?/gi, '$1 ').replace(/\s{2,}/g, ' ').replace(/^[|\s]+|[|\s]+$/g, '');
 function joinBroken(lines){
   const out = [];
-  (lines || []).forEach(l => { const t = String(l).trim(); if (!t) return;
+  (lines || []).forEach(l => { const t = noWM(l); if (!t) return;
     // строку со своим количеством («яйца 2 шт») не приклеиваем: это отдельный продукт
     if (out.length && /^[а-яё]/.test(t) && CONT.test(out[out.length - 1]) && !QTY.test(t)) out[out.length - 1] += ' ' + t; else out.push(t); });
   return out;
@@ -768,7 +772,7 @@ function recipeHTML(parts, f){
   return parts.map(p => `<section class="card recipe">
     ${p.t || p.y ? `<h3>${esc(p.t || '')}${p.t && p.y ? ' · ' : ''}${p.y ? 'ингредиенты ' + esc(p.y) : ''}</h3>` : ''}
     ${p.i && p.i.length ? `<ul class="ings">${joinBroken(p.i).map(l => `<li>${scaleIng(l, f)}</li>`).join('')}</ul>` : ''}
-    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
   </section>`).join('') || '<p class="small muted">Для этого блюда рецепт не нужен.</p>';
 }
 const familyFactor = () => members().reduce((a, m) => a + m.k, 0);
