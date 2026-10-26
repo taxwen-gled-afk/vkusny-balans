@@ -315,7 +315,7 @@ const uniqById = list => (list || []).filter((x, i, a) => a.findIndex(y => y.id 
 function afterBoot(){
   D.myfest = uniqById(D.myfest);
   // началась новая пара дней — списываем из запаса то, что уйдёт на её блюда (сервер делает это один раз на пару)
-  if ((D.pantry || []).length && !(D.consumed || []).includes(D.blocks[0])) {
+  if (!(D.consumed || []).includes(D.blocks[0])) {                          // отмечаем начало пары даже при пустом запасе
     const n = blockNeeds(0), items = [...n.map.entries()].filter(([, it]) => !it.raw).map(([key, it]) => ({key, qty: Math.round(it.q * 10) / 10}));
     save('consume', {block: D.blocks[0], items}).then(r => { D.pantry = r.pantry; D.consumed = r.consumed; render(); }).catch(() => {});
   }
@@ -725,6 +725,7 @@ function parseLine(line){
     .replace(/^\s*\d+(?:[.,]\d+)?\s+/, '').replace(/\s+\d+(?:[.,]\d+)?\s*$/, '')   // «4 яйца», «яйца 2» → «яйца»
     .replace(/\s{2,}/g, ' ').replace(/[.,\s]+$/, '').trim();
   name = name.replace(/^(яйц[оа]?|яиц)(?![а-яё])/i, 'яйца');                  // «яйцо», «яйца», «яиц» — одна строка в покупках
+  if (u === 'кг') { q = q == null ? q : q*1000; u = 'г'; } else if (u === 'л') { q = q == null ? q : q*1000; u = 'мл'; }   // «картофель 1 кг» = «картофель 1000 г»
   name = name.replace(/[\s«(/+–-]+$/, '');                                   // хвосты распознавания: «муки «», «яйца +»
   return {name: /[а-яёa-z]/i.test(name) ? name : line, q, u};
 }
@@ -1135,7 +1136,7 @@ scr.addEventListener('click', e => {
   else if (d.buy) { const block = D.blocks[S.block], k = block + '|' + d.buy, on = !D.shop[k], it = blockNeeds(S.block).map.get(d.buy);
     const qty = on && it && !it.raw ? Math.round(Math.max(0, it.q - Math.min(availFor(S.block)(d.buy), it.q))) : 0;   // по умолчанию купили ровно недостающее
     D.shop[k] = on ? myProfile().name : null; (D.shopQty = D.shopQty || {})[k] = on ? qty : null; render();
-    save('buy', {block, key: d.buy, on, qty, name: it && it.name, unit: it && it.u}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
+    save('buy', {block, key: d.buy, on, qty, need: it && !it.raw ? it.q : 0, name: it && it.name, unit: it && it.u}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
   else if (d.act === 'newsweet') newSweetSheet();
   else if (d.act === 'body') bodySheet();
   else if (d.sip) sipSheet(d.sip);
@@ -1147,7 +1148,7 @@ scr.addEventListener('click', e => {
     const step = sv === 'b' ? .5 : 1; partyOp('set', {s: sv, id2, x: Math.max(step, it.x + dir*step)}); }
   else if (d.act === 'newparty') partyOp('new').then(() => toast('Новый праздник'));
   else if (d.pbuy) { const block = 'P:' + D.party.id, k = block + '|' + d.pbuy, on = !D.shop[k];
-    D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.pbuy, on}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
+    D.shop[k] = on ? myProfile().name : null; render(); save('buy', {block, key: d.pbuy, on, qty: 0}).then(r => { D.shop[k] = r.by || null; D.pantry = r.pantry; render(); }); }
   else if (d.act === 'addpantry') pantrySheet();
   else if (d.pdel2) { D.pantry = D.pantry.filter(x => x.key !== d.pdel2); render(); save('pantry', {op: 'del', key: d.pdel2}).then(list => { D.pantry = list; render(); }); }
   else if (d.act === 'shift') { toast('Сдвигаю…'); save('shift', {shift: D.shift ? 0 : 1}).then(nd => { nd.catalog.desserts = nd.catalog.desserts || []; D = nd; S.block = 0; render(); toast('Готово: ' + blockLabel(0).short + ', план перенесён'); }); }
@@ -1157,7 +1158,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 // количество: «купили N» у позиции покупок и «сколько дома» в запасе
 document.addEventListener('change', e => { const t = e.target, d = t.dataset || {}; if (!D) return;
   if (d.bq) { const block = D.blocks[S.block], k = block + '|' + d.bq, it = blockNeeds(S.block).map.get(d.bq), qty = Math.max(0, parseFloat(String(t.value).replace(',', '.')) || 0);
-    (D.shopQty = D.shopQty || {})[k] = qty; save('buy', {block, key: d.bq, on: true, qty, name: it && it.name, unit: it && it.u}).then(r => { D.pantry = r.pantry; render(); }); }
+    (D.shopQty = D.shopQty || {})[k] = qty; save('buy', {block, key: d.bq, on: true, qty, need: it && !it.raw ? it.q : 0, name: it && it.name, unit: it && it.u}).then(r => { D.pantry = r.pantry; render(); }); }
   else if (d.pq) { const x = D.pantry.find(p => p.key === d.pq), qty = Math.max(0, parseFloat(String(t.value).replace(',', '.')) || 0); if (!x) return;
     save('pantry', {op: 'set', key: x.key, name: x.name, unit: x.unit, qty}).then(list => { D.pantry = list; render(); }); } });
 // ---------- выбор из списка на Android ----------
