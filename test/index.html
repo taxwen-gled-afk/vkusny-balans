@@ -415,7 +415,7 @@ function shiftHint(){
 }
 // ---------- чай, кофе, какао к приёму пищи ----------
 // ккал на 100 мл без сахара и молока; молоко 2,5% — 52 ккал/100 мл, сахар — 20 ккал в чайной ложке
-const SIPS = [['Кофе чёрный',2,true],['Кофе с молоком',2,true],['Чай чёрный',1,false],['Чай зелёный',1,false],['Чай фруктовый',3,false],['Какао на молоке',59,false]];
+const SIPS = [['Кофе чёрный',2,false],['Кофе с молоком',2,true],['Чай чёрный',1,true],['Чай зелёный',1,true],['Чай фруктовый',3,false],['Какао на молоке',59,false]];
 function sipSheet(t){
   let i = 0;
   sheet(`<h2>Напиток к приёму: ${TNAME[t].toLowerCase()}</h2>
@@ -433,7 +433,7 @@ function sipSheet(t){
     sh.querySelector('#sp-k').addEventListener('click', e => { const b = e.target.closest('[data-sk]'); if (!b) return; i = +b.dataset.sk;
       sh.querySelectorAll('[data-sk]').forEach(x => x.setAttribute('aria-pressed', x === b));
       if (SIPS[i][0] === 'Кофе с молоком' && !v('#sp-m')) sh.querySelector('#sp-m').value = 50;
-      if (SIPS[i][0] === 'Кофе чёрный') sh.querySelector('#sp-m').value = 0; upd(); });
+      if (!SIPS[i][2] || SIPS[i][0] !== 'Кофе с молоком') sh.querySelector('#sp-m').value = 0; upd(); });
     upd();
     sh.querySelector('#sp-add').onclick = () => { const [n, , milk] = SIPS[i], kc = calc();
       const name = n + ' ' + v('#sp-v') + ' мл' + (milk && v('#sp-m') ? ', молоко ' + v('#sp-m') + ' мл' : '') + (v('#sp-s') ? ', сахар ' + v('#sp-s') + ' ч. л.' : '') + ' (' + TNAME[t].toLowerCase() + ')';
@@ -537,7 +537,7 @@ function planScr(){
   <h2>План готовки</h2>
   <div class="seg">${D.blocks.map((b,i) => `<button type="button" aria-pressed="${i === S.block}" data-block="${i}">${blockLabel(i).short}</button>`).join('')}</div>
   <div class="small muted">${bl.long} · готовим один раз на два дня</div>
-  ${planOver(S.block).map(o => `<div class="state r">Перебор: ${esc(o.name)} — ${fmt(o.kcal)} ккал в день при норме ${fmt(o.target)} (+${fmt(o.kcal - o.target)})</div>`).join('')}
+  ${planOver(S.block).length ? `<div class="state r">Перебор калорий по блюдам дня: ${planOver(S.block).map(o => `${esc(o.name)} ${fmt(o.kcal)} при норме ${fmt(o.target)} (+${fmt(o.kcal - o.target)})`).join('; ')}</div>` : ''}
   <div class="row small"><span class="sp muted">Готовите в другие дни? Например, ${shiftHint()}</span><button class="btn ghost sm" type="button" data-act="shift">Сдвинуть на день</button></div>
   ${TYPES.map(([t, name]) => { const sl = slotOf(S.block, t), d = sl && byId(sl.id), f = factor(sl), skip = sl ? sl.skip : [];
     return `<section class="card pcard">
