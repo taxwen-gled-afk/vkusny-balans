@@ -892,12 +892,12 @@ function portionFor(d, f){
   if (!/\d\s*г(?![а-яё])/i.test(first)) return '';
   return first.replace(/(\d+(?:[.,]\d+)?)\s*г(?![а-яё])/gi, (m, v) => fmt(Math.max(5, Math.round(parseFloat(v.replace(',', '.'))*f/5)*5)) + ' г');
 }
-// граммы порции одним числом (сумма всех «N г» из первой фразы «Порции по меню»)
-const portionG = (d, k) => { const t = portionFor(d, k); return t ? [...t.matchAll(/([\d\s ]+)\s*г(?![а-яё])/gi)].reduce((a, m) => a + (+m[1].replace(/\D/g, '') || 0), 0) : 0; };
-// порции всех, кто ест блюдо: «Юля ≈230 г · Андрей ≈260 г · Дети ≈105 г»
+// граммы порции по частям: «235 г сырников и 50 г сметаны» → [235, 50]; граммы в скобках — расшифровка («в готовом виде 125 г макарон…»), их не складываем
+const portionG = (d, k) => { const t = portionFor(d, k).replace(/\([^)]*\)/g, ''); return [...t.matchAll(/([\d\s ]+)\s*г(?![а-яё])/gi)].map(m => +m[1].replace(/\D/g, '') || 0).filter(Boolean); };
+// порции всех, кто ест блюдо: «Юля ≈205 + 45 г · Андрей ≈235 + 50 г»
 function familyGrams(d, sl){
-  const who = members().filter(m => !sl || !skipped(sl.skip, m)); if (who.length < 2 || !portionG(d, 1)) return '';
-  return `<div class="small muted">${who.map(m => `${esc(m.name)} ≈${fmt(portionG(d, m.k))} г`).join(' · ')}</div>`;
+  const who = members().filter(m => !sl || !skipped(sl.skip, m)); if (who.length < 2 || !portionG(d, 1).length) return '';
+  return `<div class="small muted">${who.map(m => `${esc(m.name)} ≈${portionG(d, m.k).map(fmt).join(' + ')} г`).join(' · ')}</div>`;
 }
 // калорийность дня по плану для каждого взрослого: блюда из разных меню могут дать больше нормы
 function planOver(bi){
