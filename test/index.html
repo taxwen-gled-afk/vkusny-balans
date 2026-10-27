@@ -560,14 +560,14 @@ function planScr(){
 function menuScr(){
   const dishes = D.catalog.dishes, menus = [...new Set(dishes.map(d => d.m))].sort((a,b) => a-b);
   const q = S.q.trim().toLowerCase();
-  const list = dishes.filter(d => (!S.menuF || d.m === S.menuF) && (S.typeF === 'all' || d.t === S.typeF) && (!q || d.n.toLowerCase().includes(q)) && (!S.liked || votesOf(d.id).u.length));
+  const list = dishes.filter(d => (!S.menuF || d.m === S.menuF) && (S.typeF === 'all' || d.t === S.typeF) && (!q || d.n.toLowerCase().includes(q)) && (!S.liked || votesOf(d.id).u.length) && (!S.unck || !d.ck));
   scr.innerHTML = `
   <h2>Все меню</h2>
   <input class="search" id="q" type="search" placeholder="Найти блюдо: сырники, индейка…" value="${esc(S.q)}">
-  <div class="chips"><button type="button" aria-pressed="${!!S.liked}" data-liked="1">👍 Понравилось</button>${[0,...menus].map(m => `<button type="button" aria-pressed="${S.menuF === m}" data-menuf="${m}">${m ? menuName(m) : 'Все'}</button>`).join('')}</div>
+  <div class="chips"><button type="button" aria-pressed="${!!S.liked}" data-liked="1">👍 Понравилось</button><button type="button" aria-pressed="${!!S.unck}" data-unck="1">📝 Не вычитано</button>${[0,...menus].map(m => `<button type="button" aria-pressed="${S.menuF === m}" data-menuf="${m}">${m ? menuName(m) : 'Все'}</button>`).join('')}</div>
   <div class="seg">${[['all','Все'],...TYPES].map(([t,n]) => `<button type="button" aria-pressed="${S.typeF === t}" data-typef="${t}">${n}</button>`).join('')}</div>
-  <div class="small muted">${list.length} блюд</div>
-  <div class="list">${list.slice(0,80).map(d => `<button class="dish" type="button" data-dish="${d.id}"><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}${TNAME[d.t]}</span></span><span class="kc num">${d.k}</span></button>`).join('')}</div>
+  <div class="small muted">${list.length} блюд${S.unck ? ` · вычитано ${dishes.filter(d => d.ck).length} из ${dishes.length}` : ''}</div>
+  <div class="list">${list.slice(0,80).map(d => `<button class="dish" type="button" data-dish="${d.id}"><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}${TNAME[d.t]}${d.ck ? ' · ✓ вычитано' : d.ed ? ' · ✏️ исправлено' : ''}</span></span><span class="kc num">${d.k}</span></button>`).join('')}</div>
   ${list.length > 80 ? '<p class="small muted">Показаны первые 80. Уточните поиск.</p>' : ''}
   ${dishes.length ? '' : '<p class="small muted">Блюд пока нет: загрузите лист Dishes по инструкции.</p>'}`;
   const qi = $('#q');
@@ -853,11 +853,19 @@ function scaleIng(line, f){
   if (out === line) out = line.replace(/^(\d+(?:[.,]\d+)?)\s+/, (m, v) => r(parseFloat(v.replace(',','.'))) + ' шт. ');
   return esc(out).replace(/^([\d.,]+\s*\S+)/, '<b>$1</b>');
 }
+// граммы в шагах тоже пересчитываем, кроме «по 40г», «40г на порцию» — это на одну тарелку
+function scaleStep(s, f){
+  if (f === 1) return esc(s);
+  const r = v => { const x = v*f; return x >= 20 ? String(Math.round(x/5)*5) : x >= 3 ? String(Math.round(x)) : x.toFixed(1).replace('.', ','); };
+  return esc(s).replace(/(^|[^\d,.])(по\s+)?(\d+(?:[.,]\d+)?)(\s*)(кг|мл|г|л)(?![а-яё])(\s+на\s+(?:одну\s+|1\s+|каждую\s+)?порци[а-яё]*)?/gi,
+    (m, pre, po, v, sp, u, per) => { if (po || per) return m; const x = parseFloat(v.replace(',', '.'));
+      return pre + '<b>' + (/^(кг|л)$/i.test(u) ? String(Math.round(x*f*10)/10).replace('.', ',') : r(x)) + ' ' + u + '</b>'; });
+}
 function recipeHTML(parts, f){
   return parts.map(p => `<section class="card recipe">
     ${p.t || p.y ? `<h3>${esc(p.t || '')}${p.t && p.y ? ' · ' : ''}${p.y ? 'ингредиенты ' + esc(p.y) : ''}</h3>` : ''}
     ${p.i && p.i.length ? `<ul class="ings">${joinBroken(p.i).map(l => `<li>${scaleIng(l, f)}</li>`).join('')}</ul>` : ''}
-    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${scaleStep(s, f)}</li>`).join('')}</ol>` : ''}
   </section>`).join('') || '<p class="small muted">Для этого блюда рецепт не нужен.</p>';
 }
 const familyFactor = () => members().reduce((a, m) => a + m.k, 0);
@@ -894,6 +902,7 @@ function dishSheet(id){
   sheet(`<div><span class="tag">${menuName(d.m)}</span><span class="tag">${TNAME[d.t]}</span></div>
     <h2>${esc(d.n)}</h2>
     <div id="voteBox">${voteHTML(d.id)}</div>
+    <div class="row"><button class="btn ghost sm" type="button" id="edBtn">✏️ Исправить</button><button class="btn ghost sm" type="button" id="ckBtn" aria-pressed="${!!d.ck}">${d.ck ? '✓ Вычитано' : 'Отметить «вычитано»'}</button></div>
     <div class="kb"><div><b>${d.k}</b>ккал</div><div><b>${d.p[0]}</b>белки</div><div><b>${d.p[1]}</b>жиры</div><div><b>${d.p[2]}</b>углев.</div></div>
     ${d.ok ? '' : '<div class="small" style="color:var(--yolk)">Калорийность этого дня в меню сходится не полностью, сверим.</div>'}
     ${d.w ? `<div class="small"><b>Порция по меню:</b> ${esc(d.w)}</div>` : ''}
@@ -904,11 +913,51 @@ function dishSheet(id){
     <div class="field">Поставить в план<select id="putBlock">${D.blocks.map((b,i) => `<option value="${i}" ${i === S.block ? 'selected' : ''}>${blockLabel(i).long}</option>`).join('')}</select></div>
     <button class="btn full" type="button" id="putBtn">Поставить на ${TNAME[d.t].toLowerCase()}</button>`, sh => {
     sh.querySelector('#putBtn').onclick = () => { setDish(+sh.querySelector('#putBlock').value, d.t, d.id); close(); };
+    sh.querySelector('#edBtn').onclick = () => editDishSheet(d.id);
+    sh.querySelector('#ckBtn').onclick = () => { const on = !d.ck; d.ck = on ? 1 : 0;
+      sh.querySelector('#ckBtn').textContent = on ? '✓ Вычитано' : 'Отметить «вычитано»'; sh.querySelector('#ckBtn').setAttribute('aria-pressed', on); render();
+      save('editDish', {id: d.id, checked: on}, on ? 'Отмечено: вычитано' : '').then(putDish); };
     sh.addEventListener('click', e => { const b = e.target.closest('[data-vote]'); if (!b) return;
       const p = vote(d.id, +b.dataset.vote); sh.querySelector('#voteBox').innerHTML = voteHTML(d.id);
       p.then(() => { sh.querySelector('#voteBox').innerHTML = voteHTML(d.id); render(); }); });
     sh.addEventListener('click', e => { const b = e.target.closest('[data-sc]'); if (!b) return; scale = +b.dataset.sc;
       sh.querySelectorAll('[data-sc]').forEach(x => x.setAttribute('aria-pressed', x === b)); sh.querySelector('#recipe').innerHTML = recipeHTML(d.r, scale); });
+  });
+}
+// ---------- ручная вычитка блюда (лист Edits, переимпорт меню не стирает) ----------
+const putDish = nd => { if (!nd) return; const i = D.catalog.dishes.findIndex(x => x.id === nd.id); if (i >= 0) D.catalog.dishes[i] = nd; render(); };
+function editDishSheet(id){
+  const d = byId(id), parts = d.r.length ? d.r : [{t: '', i: [], p: []}];
+  const rows = (a, min, max) => Math.max(min, Math.min(max, (a || []).length + 1));
+  const partHTML = p => `<section class="card" data-part><div class="field">Часть рецепта<input data-pt type="text" value="${esc(p.t || '')}" placeholder="необязательно: Тесто, Соус…"></div>
+    <div class="field">Ингредиенты на весь рецепт, по строке<textarea data-pi rows="${rows(p.i, 3, 12)}">${esc((p.i || []).join('\n'))}</textarea></div>
+    <div class="field">Шаги, каждый с новой строки<textarea data-pp rows="${rows(p.p, 3, 14) * 2}">${esc((p.p || []).join('\n'))}</textarea></div></section>`;
+  sheet(`<h2>Исправить блюдо</h2>
+    <div class="small muted">Правки сохраняются в листе Edits и видны всей семье. Переимпорт меню их не сотрёт.</div>
+    <div class="field">Название<input id="ed-n" type="text" value="${esc(d.n)}"></div>
+    <div class="small muted">КБЖУ одной порции по меню (1 человек, 1 день):</div>
+    <div class="row"><div class="field sp">ккал<input id="ed-k" type="number" inputmode="decimal" value="${d.k}"></div>${['Б', 'Ж', 'У'].map((x, i) => `<div class="field sp">${x}<input id="ed-p${i}" type="number" inputmode="decimal" value="${d.p[i]}"></div>`).join('')}</div>
+    <div class="field">Порция по меню<textarea id="ed-w" rows="2" placeholder="190г сырников и 40г сметаны.">${esc(d.w || '')}</textarea></div>
+    <div class="small muted">Граммы в первой фразе («190г сырников и 40г сметаны») — это порция на 1 человека в день. Из неё считаются граммы каждого в семье.</div>
+    <div class="field">Рецепт рассчитан на порций<input id="ed-np" type="number" inputmode="numeric" min="1" value="${d.np || 2}"></div>
+    <div class="field">Покупки на 2 дня на 1 человека, по строке<textarea id="ed-s" rows="${rows(d.s, 3, 12)}" placeholder="5% творог 300г">${esc(d.s.join('\n'))}</textarea></div>
+    <div id="ed-parts">${parts.map(partHTML).join('')}</div>
+    <button class="btn ghost sm" type="button" id="ed-add">+ Ещё часть рецепта</button>
+    <label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ed-ck" ${d.ck ? 'checked' : ''}> Вычитано, всё сходится</label>
+    <button class="btn full" type="button" id="ed-save">Сохранить</button>
+    ${d.ed ? '<button class="btn ghost sm" type="button" id="ed-reset">Вернуть как в книге</button>' : ''}`, sh => {
+    const v = q => sh.querySelector(q).value, ln = t => String(t).split('\n').map(x => x.trim()).filter(Boolean);
+    sh.querySelector('#ed-add').onclick = () => sh.querySelector('#ed-parts').insertAdjacentHTML('beforeend', partHTML({}));
+    sh.querySelector('#ed-save').onclick = () => {
+      const data = {n: v('#ed-n').trim(), k: +v('#ed-k') || 0, p: [0, 1, 2].map(i => +v('#ed-p' + i) || 0), w: v('#ed-w').trim(), np: +v('#ed-np') || 2, s: ln(v('#ed-s')),
+        r: [...sh.querySelectorAll('[data-part]')].map(x => ({t: x.querySelector('[data-pt]').value.trim(), i: ln(x.querySelector('[data-pi]').value), p: ln(x.querySelector('[data-pp]').value)}))
+          .filter(x => x.t || x.i.length || x.p.length)};
+      if (!data.n) return toast('Впишите название');
+      const ck = sh.querySelector('#ed-ck').checked;
+      putDish(Object.assign({}, d, data, {ed: 1, ok: true, ck: ck ? 1 : 0})); dishSheet(id);
+      save('editDish', {id, data, checked: ck}, 'Сохранено').then(putDish); };
+    const rs = sh.querySelector('#ed-reset');
+    if (rs) rs.onclick = () => { close(); save('editDish', {id, data: null}, 'Вернула как в книге').then(putDish); };
   });
 }
 function weightsHTML(d){
@@ -1131,6 +1180,7 @@ scr.addEventListener('click', e => {
   else if (d.swap) swapSheet(d.swap);
   else if (d.menuf != null) { S.menuF = +d.menuf; render(); }
   else if (d.liked) { S.liked = !S.liked; render(); }
+  else if (d.unck) { S.unck = !S.unck; render(); }
   else if (d.typef) { S.typeF = d.typef; render(); }
   else if (d.dish != null) dishSheet(+d.dish);
   else if (d.tbl != null) { const tb = scr.querySelector('.tables'), x = tb ? tb.scrollLeft : 0, y = scr.scrollTop;   // не откидывать в начало
@@ -1186,7 +1236,7 @@ document.addEventListener('pointerdown', e => { const sel = e.target.closest && 
 ['mousedown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.target.closest && e.target.closest('select') && customSelect()) e.preventDefault(); }, true));
 
 // для локальной проверки сборки (tools/smoke.js); в Telegram __smoke не задан
-if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, swapSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
+if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, swapSheet, editDishSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
 start();
 })();
 
