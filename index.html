@@ -312,8 +312,13 @@ function lum(hex){ const n = parseInt(hex.replace('#',''), 16); return ((n>>16&2
 function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px"><h2>Вкусный баланс</h2><p>${esc(msg)}</p></div>`; }
 // одна карточка на id, даже если строку в листе MyFestive импортировали дважды
 const uniqById = list => (list || []).filter((x, i, a) => a.findIndex(y => y.id === x.id) === i);   // первая, как find на сервере
+// ключи, сохранённые до объединения по жирности («2 5% молок|мл»), приводим к новым («молок|мл») — BUG-057
+const oldKey = k => { const [w, u] = String(k).split('|'); if (!/%/.test(w)) return k; return w.split(' ').filter(x => !/^\d+%?$/.test(x)).join(' ') + '|' + (u || ''); };
 function afterBoot(){
   D.myfest = uniqById(D.myfest);
+  const sh = {}; Object.keys(D.shop || {}).forEach(k => { const i = k.indexOf('|'), nk = k.slice(0, i + 1) + oldKey(k.slice(i + 1)); if (!sh[nk] || D.shop[k]) sh[nk] = D.shop[k]; }); D.shop = sh;
+  if (D.shopQty) { const q = {}; Object.keys(D.shopQty).forEach(k => { const i = k.indexOf('|'); q[k.slice(0, i + 1) + oldKey(k.slice(i + 1))] = D.shopQty[k]; }); D.shopQty = q; }
+  D.pantry = (D.pantry || []).map(x => Object.assign({}, x, {key: oldKey(x.key)}));
   // началась новая пара дней — списываем из запаса то, что уйдёт на её блюда (сервер делает это один раз на пару)
   if (!(D.consumed || []).includes(D.blocks[0])) {                          // отмечаем начало пары даже при пустом запасе
     const n = blockNeeds(0), items = [...n.map.entries()].filter(([, it]) => !it.raw).map(([key, it]) => ({key, qty: Math.round(it.q * 10) / 10}));
@@ -560,14 +565,14 @@ function planScr(){
 function menuScr(){
   const dishes = D.catalog.dishes, menus = [...new Set(dishes.map(d => d.m))].sort((a,b) => a-b);
   const q = S.q.trim().toLowerCase();
-  const list = dishes.filter(d => (!S.menuF || d.m === S.menuF) && (S.typeF === 'all' || d.t === S.typeF) && (!q || d.n.toLowerCase().includes(q)) && (!S.liked || votesOf(d.id).u.length));
+  const list = dishes.filter(d => (!S.menuF || d.m === S.menuF) && (S.typeF === 'all' || d.t === S.typeF) && (!q || d.n.toLowerCase().includes(q)) && (!S.liked || votesOf(d.id).u.length) && (!S.unck || !d.ck));
   scr.innerHTML = `
   <h2>Все меню</h2>
   <input class="search" id="q" type="search" placeholder="Найти блюдо: сырники, индейка…" value="${esc(S.q)}">
-  <div class="chips"><button type="button" aria-pressed="${!!S.liked}" data-liked="1">👍 Понравилось</button>${[0,...menus].map(m => `<button type="button" aria-pressed="${S.menuF === m}" data-menuf="${m}">${m ? menuName(m) : 'Все'}</button>`).join('')}</div>
+  <div class="chips"><button type="button" aria-pressed="${!!S.liked}" data-liked="1">👍 Понравилось</button><button type="button" aria-pressed="${!!S.unck}" data-unck="1">📝 Не вычитано</button>${[0,...menus].map(m => `<button type="button" aria-pressed="${S.menuF === m}" data-menuf="${m}">${m ? menuName(m) : 'Все'}</button>`).join('')}</div>
   <div class="seg">${[['all','Все'],...TYPES].map(([t,n]) => `<button type="button" aria-pressed="${S.typeF === t}" data-typef="${t}">${n}</button>`).join('')}</div>
-  <div class="small muted">${list.length} блюд</div>
-  <div class="list">${list.slice(0,80).map(d => `<button class="dish" type="button" data-dish="${d.id}"><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}${TNAME[d.t]}</span></span><span class="kc num">${d.k}</span></button>`).join('')}</div>
+  <div class="small muted">${list.length} блюд${S.unck ? ` · вычитано ${dishes.filter(d => d.ck).length} из ${dishes.length}` : ''}</div>
+  <div class="list">${list.slice(0,80).map(d => `<button class="dish" type="button" data-dish="${d.id}"><span class="sp"><span class="nm">${esc(d.n)}</span><br><span class="small muted"><span class="tag">${menuName(d.m)}</span>${likeBadge(d.id)}${TNAME[d.t]}${d.ck ? ' · ✓ вычитано' : d.ed ? ' · ✏️ исправлено' : ''}</span></span><span class="kc num">${d.k}</span></button>`).join('')}</div>
   ${list.length > 80 ? '<p class="small muted">Показаны первые 80. Уточните поиск.</p>' : ''}
   ${dishes.length ? '' : '<p class="small muted">Блюд пока нет: загрузите лист Dishes по инструкции.</p>'}`;
   const qi = $('#q');
@@ -707,6 +712,7 @@ const CATS = [['Мясо, птица, рыба',/(фарш|(?:^|[^а-яё])ку�
 const DRY = /(крахмал|хлоп|хлебц|мук[аиу](?![а-яё])|круп[аыу](?![а-яё])|сух[а-яё]*\s+завтрак)/i;
 const catOf = name => DRY.test(name) ? CATS.length - 1 : CATS.findIndex(([,re]) => re.test(name));
 // Строка покупки → {name, q, u}. Порядок важен: ложки, штуки, «4 яйца» (число + слово), граммы/литры.
+const PCT = /\d+(?:[.,]\d+)?\s*%/g;   // жирность: в покупках одна строка, проценты — в названии
 const SPOON = /(\d+(?:[.,]\d+)?)\s*(ст|ч)\.?\s*л\.?/i;
 const plural = (n, one, few, many) => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b > 1 && b < 5 ? few : many; };
 function parseLine(line){
@@ -715,6 +721,7 @@ function parseLine(line){
   const num = x => parseFloat(x.replace(',', '.'));
   if ((m = line.match(SPOON))) { q = num(m[1]); u = m[2].toLowerCase() + '.л.'; }
   else if ((m = line.match(/(\d+(?:[.,]\d+)?)\s*зубч/i))) { q = num(m[1]); u = 'зуб.'; }      // «чеснок 1 зубчик» = «1 зубчик чеснока»
+  else if ((m = line.match(/(\d+(?:[.,]\d+)?)\s*(кг|мл|г|л)\.?\s*\/\s*\d+\s*шт/i))) { q = num(m[1]); u = m[2].toLowerCase(); }   // «10г/2шт» — считаем граммы
   else if ((m = line.match(/(\d+(?:[.,]\d+)?)\s*шт/i))) { q = num(m[1]); u = 'шт'; }
   else if ((m = line.match(/^\s*(\d+(?:[.,]\d+)?)\s+[а-яё]/i)) && !/\d\s*(кг|мл|г|л)(?![а-я])/i.test(line)) { q = num(m[1]); u = 'шт'; }
   else if ((m = line.match(/[а-яё]\s+(\d+(?:[.,]\d+)?)\s*$/i))) { q = num(m[1]); u = 'шт'; }   // «яйца 2»
@@ -724,6 +731,7 @@ function parseLine(line){
     .replace(/(^|\s)(средн|небольш|крупн|мелк)[а-яё]*/gi, ' ')               // «яблоко средних» = «яблоко»
     .replace(/^\s*\d+(?:[.,]\d+)?\s+/, '').replace(/\s+\d+(?:[.,]\d+)?\s*$/, '')   // «4 яйца», «яйца 2» → «яйца»
     .replace(/\s{2,}/g, ' ').replace(/[.,\s]+$/, '').trim();
+  name = name.replace(/[,;]?\s*(?:по желанию|можно без н[а-яё]*|можно и без[а-яё ]*|на ваш вкус|по вкусу|для подачи|для смазывания[а-яё ]*)/gi, '').replace(/\s{2,}/g, ' ').trim();   // «оливки по желанию, можно без них» = «оливки»
   name = name.replace(/^(яйц[оа]?|яиц)(?![а-яё])/i, 'яйца');                  // «яйцо», «яйца», «яиц» — одна строка в покупках
   if (u === 'кг') { q = q == null ? q : q*1000; u = 'г'; } else if (u === 'л') { q = q == null ? q : q*1000; u = 'мл'; }   // «картофель 1 кг» = «картофель 1000 г»
   name = name.replace(/[\s«(/+–-]+$/, '');                                   // хвосты распознавания: «муки «», «яйца +»
@@ -743,16 +751,19 @@ function joinBroken(lines){
 }
 // Ключ строки покупок: «сыр твердый» = «твердый сыр», «подсолнечное масло» = «масла подсолнечного»
 const stem = w => w.replace(/ё/g, 'е').replace(/(ого|его|ому|ему|ыми|ими|ой|ей|ый|ий|ая|яя|ое|ее|ые|ие|ых|их|ую|юю|ом|ем|ам|ям|ах|ях|а|я|ы|и|у|ю|о|е|ь|й)$/, '').slice(0, 6);
-const shopKey = name => name.toLowerCase().split(/[^а-яёa-z0-9%]+/).filter(Boolean).map(stem).filter(Boolean).sort().join(' ');
+const shopKey = name => name.replace(PCT, ' ').toLowerCase().split(/[^а-яёa-z0-9%]+/).filter(Boolean).map(stem).filter(Boolean).sort().join(' ');
 // sources: [{lines, f}] → продукты по разделам. f — во сколько раз умножить количества.
 function shopBuild(sources){
   const map = new Map();
   sources.forEach(({lines, f, cat}) => { if (!f) return;                          // блюдо никто не ест — продукты не нужны
     joinBroken(lines).map(l => l.replace(/[.\s]*для [а-яё ]+:$/i, '')).filter(l => /[а-яё]/i.test(l) && !/:$/.test(l)).forEach(line => {   // без «…для соуса:», «(на 2 порции):»
-      const it = parseLine(line), key = (shopKey(it.name) + '|' + it.u).slice(0, 90);
-      const cur = map.get(key) || {name: it.name, q: 0, u: it.u, raw: it.q == null, cat}; if (it.q != null) { cur.q += it.q*f; cur.raw = false; }
-      if (it.name.length < cur.name.length) cur.name = it.name;                  // из «репчатого лука» и «лук репчатый» показываем короче
+      const it = parseLine(line), pct = it.name.match(PCT) || [], base = it.name.replace(PCT, ' ').replace(/\s{2,}/g, ' ').trim() || it.name;
+      const key = (shopKey(base) + '|' + it.u).slice(0, 90);                     // «молоко 2,5%» и «3,5% молоко» — одна строка (shopKey без %)
+      const cur = map.get(key) || {name: base, q: 0, u: it.u, raw: it.q == null, cat, v: []}; if (it.q != null) { cur.q += it.q*f; cur.raw = false; }
+      if (base.length < cur.name.length) cur.name = base;                        // из «репчатого лука» и «лук репчатый» показываем короче
+      pct.forEach(x => { x = x.replace(/\s/g, '').replace('.', ','); if (!cur.v.includes(x)) cur.v.push(x); });
       map.set(key, cur); }); });
+  map.forEach(it => { if (it.v.length) it.name += ' ' + it.v.sort((a, b) => parseFloat(a.replace(',', '.')) - parseFloat(b.replace(',', '.'))).join(' / '); });
   const groups = [...CATS.map(([c]) => [c, []]), ['Напитки', []]];
   [...map.entries()].forEach(([key, it]) => groups[it.cat === 'drink' ? CATS.length : catOf(it.name)][1].push([key, it]));
   return {map, groups};
@@ -853,11 +864,23 @@ function scaleIng(line, f){
   if (out === line) out = line.replace(/^(\d+(?:[.,]\d+)?)\s+/, (m, v) => r(parseFloat(v.replace(',','.'))) + ' шт. ');
   return esc(out).replace(/^([\d.,]+\s*\S+)/, '<b>$1</b>');
 }
+// граммы в шагах тоже пересчитываем, кроме «по 40г», «40г на порцию» — это на одну тарелку
+function scaleStep(s, f){
+  if (f === 1) return esc(s);
+  const r = v => { const x = v*f; return x >= 20 ? String(Math.round(x/5)*5) : x >= 3 ? String(Math.round(x)) : x.toFixed(1).replace('.', ','); };
+  const num = v => parseFloat(v.replace(',', '.'));
+  return esc(s).replace(/(^|[^\d,.\/])(по\s+)?(\d+(?:[.,]\d+)?)(?:\s*[-–]\s*(\d+(?:[.,]\d+)?))?(\s*)(кг|мл|г|л)(?![а-яё])/gi,
+    (m, pre, po, a, b, sp, u, off, all) => {
+      const rest = all.slice(off + m.length, off + m.length + 40);
+      if (po || /^[^.;!?]{0,25}?\(?\s*на\s+(?:одну\s+|1\s+|каждую\s+)?порци/i.test(rest)) return m;   // «по 50г», «40г сыра (на 1 порцию)» — на одну тарелку
+      const one = v => /^(кг|л)$/i.test(u) ? String(Math.round(num(v)*f*10)/10).replace('.', ',') : r(num(v));
+      return pre + '<b>' + one(a) + (b ? '–' + one(b) : '') + ' ' + u + '</b>'; });
+}
 function recipeHTML(parts, f){
   return parts.map(p => `<section class="card recipe">
     ${p.t || p.y ? `<h3>${esc(p.t || '')}${p.t && p.y ? ' · ' : ''}${p.y ? 'ингредиенты ' + esc(p.y) : ''}</h3>` : ''}
     ${p.i && p.i.length ? `<ul class="ings">${joinBroken(p.i).map(l => `<li>${scaleIng(l, f)}</li>`).join('')}</ul>` : ''}
-    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${scaleStep(s, f)}</li>`).join('')}</ol>` : ''}
   </section>`).join('') || '<p class="small muted">Для этого блюда рецепт не нужен.</p>';
 }
 const familyFactor = () => members().reduce((a, m) => a + m.k, 0);
@@ -894,6 +917,7 @@ function dishSheet(id){
   sheet(`<div><span class="tag">${menuName(d.m)}</span><span class="tag">${TNAME[d.t]}</span></div>
     <h2>${esc(d.n)}</h2>
     <div id="voteBox">${voteHTML(d.id)}</div>
+    <div class="row"><button class="btn ghost sm" type="button" id="edBtn">✏️ Исправить</button><button class="btn ghost sm" type="button" id="ckBtn" aria-pressed="${!!d.ck}">${d.ck ? '✓ Вычитано' : 'Отметить «вычитано»'}</button></div>
     <div class="kb"><div><b>${d.k}</b>ккал</div><div><b>${d.p[0]}</b>белки</div><div><b>${d.p[1]}</b>жиры</div><div><b>${d.p[2]}</b>углев.</div></div>
     ${d.ok ? '' : '<div class="small" style="color:var(--yolk)">Калорийность этого дня в меню сходится не полностью, сверим.</div>'}
     ${d.w ? `<div class="small"><b>Порция по меню:</b> ${esc(d.w)}</div>` : ''}
@@ -904,11 +928,243 @@ function dishSheet(id){
     <div class="field">Поставить в план<select id="putBlock">${D.blocks.map((b,i) => `<option value="${i}" ${i === S.block ? 'selected' : ''}>${blockLabel(i).long}</option>`).join('')}</select></div>
     <button class="btn full" type="button" id="putBtn">Поставить на ${TNAME[d.t].toLowerCase()}</button>`, sh => {
     sh.querySelector('#putBtn').onclick = () => { setDish(+sh.querySelector('#putBlock').value, d.t, d.id); close(); };
+    sh.querySelector('#edBtn').onclick = () => editDishSheet(d.id);
+    sh.querySelector('#ckBtn').onclick = () => { const on = !d.ck; d.ck = on ? 1 : 0;
+      sh.querySelector('#ckBtn').textContent = on ? '✓ Вычитано' : 'Отметить «вычитано»'; sh.querySelector('#ckBtn').setAttribute('aria-pressed', on); render();
+      save('editDish', {id: d.id, checked: on}, on ? 'Отмечено: вычитано' : '').then(putDish); };
     sh.addEventListener('click', e => { const b = e.target.closest('[data-vote]'); if (!b) return;
       const p = vote(d.id, +b.dataset.vote); sh.querySelector('#voteBox').innerHTML = voteHTML(d.id);
       p.then(() => { sh.querySelector('#voteBox').innerHTML = voteHTML(d.id); render(); }); });
     sh.addEventListener('click', e => { const b = e.target.closest('[data-sc]'); if (!b) return; scale = +b.dataset.sc;
       sh.querySelectorAll('[data-sc]').forEach(x => x.setAttribute('aria-pressed', x === b)); sh.querySelector('#recipe').innerHTML = recipeHTML(d.r, scale); });
+  });
+}
+// ---------- калорийность продуктов (на 100 г; средние значения из справочников) ----------
+// [шаблон, ккал, белки, жиры, углеводы, вес 1 шт в г]. Порядок важен: сначала точные («творожный сыр»), потом общие («сыр»).
+// Молочное с жирностью («5% творог») считаем по формуле: белки и углеводы — из таблицы, жиры — из процента.
+const NUTRI = [
+  ['бульон|нори|соль|перец черн|перец молот|специ|приправ|паприк|куркум|карри|зир[аы]|орегано|базилик сух|прованск|итальянск трав|лавров|ванил|разрыхл|сода|желатин|дрожж|корица|мускат|хмели|чесночн порош|сухой чеснок|чеснок сух|уксус|вода|воды|кипят|лед|сахарозамен|подсластит|стеви|эритрит|пребиосвит|фитпарад|по вкусу', 0, 0, 0, 0],
+  ['творожн\\S* сыр|сыр творожн|сливочн\\S* сыр|сыр сливочн|креметт|филадельф', 230, 7, 21, 3],
+  ['плавлен', 250, 12, 20, 6, 20],
+  ['моцарел', 240, 18, 17, 2, 125],
+  ['рикотт', 170, 11, 13, 3],
+  ['фет|брынз', 260, 17, 21, 1],
+  ['пармез', 390, 35, 26, 0],
+  ['сыр(?![но])|сыра|сыру', 350, 25, 27, 0],
+  ['творожок|агуша|фруто|творожн\\S* (?:десерт|паст)|данон', 105, 8, 3.9, 11, 100],
+  ['сырок', 400, 9, 25, 32, 50],
+  ['творог|творож', 0, 17, 5, 2.5],
+  ['греческ\\S* йогурт|йогурт греческ|скир', 0, 8, 2, 4],
+  ['йогурт', 0, 4, 2.5, 6],
+  ['кефир', 0, 3, 2.5, 4],
+  ['ряженк', 0, 2.9, 4, 4.2],
+  ['сметан', 0, 2.8, 15, 3.2],
+  ['сливк|сливок', 0, 2.6, 10, 4],
+  ['сгущ', 320, 7, 8.5, 56],
+  ['молок', 0, 3, 2.5, 4.7],
+  ['масл\\S* слив|слив\\S* масл', 748, 0.5, 82, 0.8],
+  ['масл', 899, 0, 99.9, 0],
+  ['перепел', 168, 12, 13, 0.6, 11],
+  ['белок яйц|яичн\\S* бел|белк', 44, 11, 0, 0, 33],
+  ['желток', 352, 16, 31, 1, 17],
+  ['яйц|яиц|яйко', 157, 12.7, 11.5, 0.7, 55],
+  ['фарш говяж|говяжий фарш|фарш из говяд', 254, 17, 20, 0],
+  ['фарш свин|свиной фарш', 263, 17, 21, 0],
+  ['фарш индей|фарш куриц|куриный фарш|фарш курин', 160, 18, 10, 0],
+  ['фарш', 220, 17, 17, 0],
+  ['филе грудк|грудк|куриное филе|филе курин|куриного филе', 113, 23.6, 1.9, 0.4],
+  ['бедр|окорочк|окорок|голен', 185, 18, 12, 0, 100],
+  ['крыл', 190, 18, 13, 0, 90],
+  ['копчен\\S* (?:кур|груд)|кур\\S* копч', 184, 25, 9, 0],
+  ['печень[ея]|печенья', 420, 7, 12, 70],
+  ['печен|печён', 140, 20, 6, 1],
+  ['сердеч|желуд', 150, 16, 9, 1],
+  ['индейк|индюш', 115, 22, 2.5, 0],
+  ['кур|цыпл', 190, 18, 13, 0],
+  ['ветчин', 180, 16, 12, 2],
+  ['бекон', 450, 15, 43, 0],
+  ['колбас|сосис|сардел', 260, 12, 23, 2],
+  ['свинин', 260, 16, 21, 0],
+  ['говяд|телят', 190, 19, 12, 0],
+  ['баранин', 210, 16, 16, 0],
+  ['форел|семг|сёмг|лосос|горбуш|кет[аы]|нерк', 160, 20, 8, 0],
+  ['тунец|тунц', 100, 23, 1, 0],
+  ['кальмар сух|сух\\S* кальмар|сушен\\S* кальмар', 286, 63, 2, 2],
+  ['кальмар', 100, 18, 2.2, 2],
+  ['кревет', 95, 19, 1.5, 0],
+  ['краб', 90, 6, 1, 10, 17],
+  ['сельд|сел[её]д', 220, 17, 17, 0],
+  ['скумбри', 190, 18, 13, 0],
+  ['минта|треск|хек|тилап|пангас|судак|щук|камбал|дорад|сибас|рыб', 80, 17, 1, 0],
+  ['мука рисов|рисов\\S* мук', 366, 6, 1.4, 80],
+  ['мук|муки', 334, 10, 1.2, 70],
+  ['крахмал', 343, 0.3, 0, 85],
+  ['манн|манк', 333, 10.3, 1, 70.6],
+  ['овсян|геркулес', 352, 12, 6, 60],
+  ['гречк|гречн', 313, 12.6, 3.3, 62],
+  ['булгур', 342, 12, 1.3, 64],
+  ['кус-?кус', 376, 12.8, 0.6, 77],
+  ['киноа', 368, 14, 6, 57],
+  ['перлов', 320, 9, 1, 67],
+  ['пшен', 342, 11.5, 3.3, 66.5],
+  ['чечевиц', 300, 24, 1.5, 47],
+  ['нут', 330, 19, 6, 50],
+  ['рисов\\S* бумаг', 330, 6, 1, 75],
+  ['рис', 330, 7, 1, 74],
+  ['фунчоз|рисов\\S* лапш', 330, 0.7, 0.1, 82],
+  ['лапш|макарон|спагетт|паст[аы]|фузилли|пенне|вермиш|феттуч|ризони|птитим|орзо', 340, 11, 1.3, 70],
+  ['лаваш', 270, 9, 1.2, 56],
+  ['тортиль|лепешк|лепёшк', 300, 8, 7, 50, 40],
+  ['хлебц', 360, 10, 3, 70, 10],
+  ['сухар|панко', 347, 9.7, 1.9, 77],
+  ['батон|багет|хлеб|тост|булочк|булк', 260, 8, 3, 50, 30],
+  ['сахар|мед|мёд|сироп|джем|варень', 380, 0.3, 0, 82],
+  ['шоколад|конфет', 540, 6, 35, 52, 10],
+  ['какао', 290, 24, 15, 10],
+  ['зефир|мармелад|пастил', 320, 0.8, 0.1, 78, 35],
+  ['пикник|батончик', 480, 6, 25, 58, 52],
+  ['протеинов\\S* батон', 350, 30, 10, 35, 50],
+  ['пудинг', 70, 10, 1.5, 4, 200],
+  ['кешью', 600, 18, 48, 22],
+  ['миндал', 610, 21, 53, 13],
+  ['грецк|орех|фундук|арахис|фисташ', 650, 15, 60, 10],
+  ['мак(?![а-яё])|мака|маком', 550, 18, 48, 14],
+  ['кунжут|семеч|семена|семян|чиа|льн', 570, 20, 48, 12],
+  ['кокос', 600, 6, 60, 20],
+  ['изюм|курага|финик|чернослив|вялен\\S* вишн|сухофрукт|клюкв\\S* вялен', 280, 3, 0.5, 66],
+  ['томатн\\S* паст', 100, 5, 0, 19],
+  ['кетчуп', 100, 1.8, 1, 22],
+  ['майонез', 620, 1, 67, 3],
+  ['соев\\S* соус', 50, 6, 0, 6],
+  ['горчиц', 160, 6, 10, 10],
+  ['песто', 450, 5, 45, 5],
+  ['соус|томат\\S* протерт|протерт\\S* томат|томаты в соб|пассата', 40, 1.5, 0.5, 7],
+  ['консерв\\S* кукуруз|кукуруз\\S* консерв|кукуруз', 60, 2.2, 0.4, 11],
+  ['горош\\S* консерв|консерв\\S* горош', 55, 3.6, 0.1, 10],
+  ['горош', 75, 5, 0.2, 13],
+  ['фасол\\S* стручк|стручк', 30, 2, 0.2, 5],
+  ['фасол', 90, 6, 0.5, 13],
+  ['оливк|оливок|маслин', 160, 1.5, 15, 3, 4],
+  ['авокадо', 160, 2, 15, 2, 150],
+  ['картоф', 77, 2, 0.4, 16, 130],
+  ['батат', 86, 1.6, 0.1, 20],
+  ['свекл|свёкл', 42, 1.5, 0.1, 8.8, 150],
+  ['морков', 35, 1.3, 0.1, 7, 80],
+  ['лук', 41, 1.4, 0, 9, 90],
+  ['чеснок|зубч', 149, 6.5, 0.5, 30, 5],
+  ['тыкв', 26, 1, 0.1, 6],
+  ['овощн\\S* смес|смес\\S* (?:заморож\\S* )?овощ', 40, 2, 0.2, 7],
+  ['кабач|цукин|цуккин', 24, 0.6, 0.3, 4.6, 250],
+  ['баклаж', 24, 1.2, 0.1, 4.5, 250],
+  ['перец|перц', 27, 1.3, 0, 5.3, 150],
+  ['черри', 18, 0.9, 0.2, 3.9, 15],
+  ['помидор|томат', 20, 0.9, 0.2, 3.9, 120],
+  ['огур', 15, 0.8, 0.1, 2.8, 100],
+  ['капуст|брокколи|цветн', 28, 2, 0.2, 5],
+  ['шампин|гриб|вешенк', 27, 4.3, 1, 0.1],
+  ['шпинат|руккол|салат|айсберг|ромэн|латук|зелен|укроп|петрушк|кинз|щавел|сельдер|редис|редьк|дайкон|спарж', 20, 1.8, 0.3, 3],
+  ['лимон|лайм', 34, 0.9, 0.1, 3, 100],
+  ['апельсин|мандарин|грейпфр|помел', 43, 0.9, 0.2, 8.1, 130],
+  ['банан', 96, 1.5, 0.2, 21, 120],
+  ['яблок|яблоч', 47, 0.4, 0.4, 9.8, 165],
+  ['груш', 47, 0.4, 0.3, 10.3, 150],
+  ['хурм', 67, 0.5, 0.4, 15.3, 200],
+  ['виноград', 72, 0.6, 0.6, 15.4],
+  ['киви', 47, 0.8, 0.4, 8.1, 75],
+  ['персик|нектарин|абрикос|слив[аы](?![а-яё])', 45, 0.9, 0.1, 10, 100],
+  ['ананас', 52, 0.3, 0.1, 11.8],
+  ['манго', 60, 0.8, 0.4, 15],
+  ['клубник|малин|черник|голубик|смородин|вишн|черешн|брусник|клюкв|ягод', 45, 0.8, 0.4, 9],
+  ['кукурузн\\S* хлоп|хлопь', 360, 8, 1, 80],
+];
+const NUTRI_RE = NUTRI.map(([re, ...v]) => [new RegExp('(?:^|[^а-яё])(?:' + re + ')', 'i'), ...v]);
+const SPOON_G = (u, name) => (/^ст/.test(u) ? 15 : 5) * (/масл/i.test(name) ? 0.9 : /мук|крахмал|какао/i.test(name) ? 0.65 : /мед|мёд|сироп|соус|паст/i.test(name) ? 1.4 : 1);
+/** Строка ингредиента → {g, k, p, f, c} или {skip} (соль, вода) или {miss} (не нашли в таблице) */
+function nutriOf(line){
+  // «200г филе (150г в вареном виде)» — считаем сырой вес, а не то, что в скобках
+  const bare = String(line).replace(/\([^)]*\)/g, ' '), it0 = parseLine(bare), it = it0.q != null ? it0 : parseLine(line), low = String(line).toLowerCase().replace(/ё/g, 'е'), nm = it.name.toLowerCase().replace(/ё/g, 'е');
+  const row = NUTRI_RE.find(([re]) => re.test(' ' + nm)) || NUTRI_RE.find(([re]) => re.test(' ' + low));
+  if (!row) return {miss: it.name};
+  let [, k, p, f, c, pc] = row;
+  if (!k && !p && !f && !c) return {skip: true};
+  if (!k) { const m = low.match(/(\d+(?:[.,]\d+)?)\s*%/); if (m) f = parseFloat(m[1].replace(',', '.')); k = Math.round(4*p + 9*f + 4*c); }   // молочное: жирность из «5%»
+  let g = null;
+  if (it.q == null) return {skip: true};                                     // «зелень по желанию»
+  if (it.u === 'г' || it.u === 'мл') g = it.q;
+  else if (/л\.$/.test(it.u)) g = it.q * SPOON_G(it.u, nm);
+  else if (it.u === 'зуб.') g = it.q * 5;
+  else if (it.u === 'шт') g = it.q * (pc || 0);
+  if (!g) return {miss: it.name};
+  return {g, k: k*g/100, p: p*g/100, f: f*g/100, c: c*g/100};
+}
+/** Сумма по списку строк: {k, p, f, c, g, miss: [названия]} */
+function nutriSum(lines){
+  const t = {k: 0, p: 0, f: 0, c: 0, g: 0, miss: []};
+  joinBroken(lines || []).filter(l => /[а-яё]/i.test(l) && !/:$/.test(l)).forEach(l => { const n = nutriOf(l); if (n.miss) t.miss.push(n.miss); else if (!n.skip) ['k', 'p', 'f', 'c', 'g'].forEach(x => t[x] += n[x]); });
+  return t;
+}
+
+// ---------- ручная вычитка блюда (лист Edits, переимпорт меню не стирает) ----------
+const putDish = nd => { if (!nd) return; const i = D.catalog.dishes.findIndex(x => x.id === nd.id); if (i >= 0) D.catalog.dishes[i] = nd; render(); };
+// ккал/БЖУ одной порции по таблице продуктов: ингредиенты рецепта / порций + то, что есть только в покупках (хлеб, огурцы), / 2 дня
+function dishCalc(parts, shop, np){
+  const base = l => shopKey(parseLine(l).name.replace(PCT, ' '));
+  const ing = [].concat(...(parts || []).map(x => x.i || [])), keys = new Set(ing.map(base));
+  const r = nutriSum(ing), x = nutriSum((shop || []).filter(l => !keys.has(base(l))));
+  const out = {g: r.g, miss: r.miss.concat(x.miss)};
+  ['k', 'p', 'f', 'c'].forEach(k => out[k] = (ing.length ? r[k] / np : 0) + x[k] / 2);
+  return out;
+}
+// «190г сырников и 40г сметаны» × ratio — только первая фраза, остальное как было
+function scaleFirstGrams(w, ratio){
+  if (!(ratio > 0) || Math.abs(ratio - 1) < .005) return w;
+  const m = w.match(/^(.*?)(\.\s+[А-ЯЁA-Z].*)?$/s), first = m[1], rest = m[2] || '';
+  return first.replace(/(\d+(?:[.,]\d+)?)\s*г(?![а-яё])/gi, (x, v) => Math.max(5, Math.round(parseFloat(v.replace(',', '.')) * ratio / 5) * 5) + 'г') + rest;
+}
+function editDishSheet(id){
+  const d = byId(id), parts = d.r.length ? d.r : [{t: '', i: [], p: []}];
+  const rows = (a, min, max) => Math.max(min, Math.min(max, (a || []).length + 1));
+  const partHTML = p => `<section class="card" data-part><div class="field">Часть рецепта<input data-pt type="text" value="${esc(p.t || '')}" placeholder="необязательно: Тесто, Соус…"></div>
+    <div class="field">Ингредиенты на весь рецепт, по строке<textarea data-pi rows="${rows(p.i, 3, 12)}">${esc((p.i || []).join('\n'))}</textarea></div>
+    <div class="field">Шаги, каждый с новой строки<textarea data-pp rows="${rows(p.p, 3, 14) * 2}">${esc((p.p || []).join('\n'))}</textarea></div></section>`;
+  sheet(`<h2>Исправить блюдо</h2>
+    <div class="small muted">Правки сохраняются в листе Edits и видны всей семье. Переимпорт меню их не сотрёт.</div>
+    <div class="field">Название<input id="ed-n" type="text" value="${esc(d.n)}"></div>
+    <div class="small muted">КБЖУ одной порции по меню (1 человек, 1 день). Меняете ингредиенты — цифры пересчитываются сами.</div>
+    <div class="row"><div class="field sp">ккал<input id="ed-k" type="number" inputmode="decimal" value="${d.k}"></div>${['Б', 'Ж', 'У'].map((x, i) => `<div class="field sp">${x}<input id="ed-p${i}" type="number" inputmode="decimal" value="${d.p[i]}"></div>`).join('')}</div>
+    <div class="small muted" id="ed-calc"></div>
+    <div class="field">Порция по меню<textarea id="ed-w" rows="2" placeholder="190г сырников и 40г сметаны.">${esc(d.w || '')}</textarea></div>
+    <div class="small muted">Граммы в первой фразе («190г сырников и 40г сметаны») — это порция на 1 человека в день. Из неё считаются граммы каждого в семье.</div>
+    <div class="field">Рецепт рассчитан на порций<input id="ed-np" type="number" inputmode="numeric" min="1" value="${d.np || 2}"></div>
+    <div class="field">Покупки на 2 дня на 1 человека, по строке<textarea id="ed-s" rows="${rows(d.s, 3, 12)}" placeholder="5% творог 300г">${esc(d.s.join('\n'))}</textarea></div>
+    <div id="ed-parts">${parts.map(partHTML).join('')}</div>
+    <button class="btn ghost sm" type="button" id="ed-add">+ Ещё часть рецепта</button>
+    <label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="ed-ck" ${d.ck ? 'checked' : ''}> Вычитано, всё сходится</label>
+    <button class="btn full" type="button" id="ed-save">Сохранить</button>
+    ${d.ed ? '<button class="btn ghost sm" type="button" id="ed-reset">Вернуть как в книге</button>' : ''}`, sh => {
+    const v = q => sh.querySelector(q).value, ln = t => String(t).split('\n').map(x => x.trim()).filter(Boolean);
+    const partsNow = () => [...sh.querySelectorAll('[data-part]')].map(x => ({t: x.querySelector('[data-pt]').value.trim(), i: ln(x.querySelector('[data-pi]').value), p: ln(x.querySelector('[data-pp]').value)}));
+    // ккал и порция считаются сами: к цифрам книги прибавляем разницу по таблице продуктов
+    const c0 = dishCalc(d.r, d.s, d.np || 2), hand = {k: false, w: false};
+    const auto = () => {
+      const c = dishCalc(partsNow(), ln(v('#ed-s')), +v('#ed-np') || 2);
+      if (!hand.k) { sh.querySelector('#ed-k').value = Math.max(0, Math.round(d.k + c.k - c0.k)); ['p', 'f', 'c'].forEach((x, i) => sh.querySelector('#ed-p' + i).value = Math.max(0, Math.round(d.p[i] + c[x] - c0[x]))); }
+      if (!hand.w && c0.g && c.g) sh.querySelector('#ed-w').value = scaleFirstGrams(d.w || '', c.g / (+v('#ed-np') || 2) / (c0.g / (d.np || 2)));
+      sh.querySelector('#ed-calc').textContent = `По таблице продуктов ≈ ${Math.round(c.k)} ккал на порцию` + (c.miss.length ? ` · не нашла: ${[...new Set(c.miss)].slice(0, 6).join(', ')}` : '');
+    };
+    sh.addEventListener('input', e => { const id = e.target.id || '';
+      if (/^ed-(k|p\d)$/.test(id)) hand.k = true; else if (id === 'ed-w') hand.w = true; else if (id !== 'ed-n') auto(); });
+    auto();
+    sh.querySelector('#ed-add').onclick = () => sh.querySelector('#ed-parts').insertAdjacentHTML('beforeend', partHTML({}));
+    sh.querySelector('#ed-save').onclick = () => {
+      const data = {n: v('#ed-n').trim(), k: +v('#ed-k') || 0, p: [0, 1, 2].map(i => +v('#ed-p' + i) || 0), w: v('#ed-w').trim(), np: +v('#ed-np') || 2, s: ln(v('#ed-s')),
+        r: partsNow().filter(x => x.t || x.i.length || x.p.length)};
+      if (!data.n) return toast('Впишите название');
+      const ck = sh.querySelector('#ed-ck').checked;
+      putDish(Object.assign({}, d, data, {ed: 1, ok: true, ck: ck ? 1 : 0})); dishSheet(id);
+      save('editDish', {id, data, checked: ck}, 'Сохранено').then(putDish); };
+    const rs = sh.querySelector('#ed-reset');
+    if (rs) rs.onclick = () => { close(); save('editDish', {id, data: null}, 'Вернула как в книге').then(putDish); };
   });
 }
 function weightsHTML(d){
@@ -1131,6 +1387,7 @@ scr.addEventListener('click', e => {
   else if (d.swap) swapSheet(d.swap);
   else if (d.menuf != null) { S.menuF = +d.menuf; render(); }
   else if (d.liked) { S.liked = !S.liked; render(); }
+  else if (d.unck) { S.unck = !S.unck; render(); }
   else if (d.typef) { S.typeF = d.typef; render(); }
   else if (d.dish != null) dishSheet(+d.dish);
   else if (d.tbl != null) { const tb = scr.querySelector('.tables'), x = tb ? tb.scrollLeft : 0, y = scr.scrollTop;   // не откидывать в начало
@@ -1186,7 +1443,7 @@ document.addEventListener('pointerdown', e => { const sel = e.target.closest && 
 ['mousedown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.target.closest && e.target.closest('select') && customSelect()) e.preventDefault(); }, true));
 
 // для локальной проверки сборки (tools/smoke.js); в Telegram __smoke не задан
-if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, swapSheet, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
+if (window.__smoke) window.__smoke({S, render, dishSheet, profileSheet, bodySheet, myFestSheet, sipSheet, swapSheet, editDishSheet, shopBuild, nutriSum, boot(d){ D = d; afterBoot(); }, get D(){ return D; }});
 start();
 })();
 
