@@ -312,8 +312,13 @@ function lum(hex){ const n = parseInt(hex.replace('#',''), 16); return ((n>>16&2
 function fatal(msg){ scr.innerHTML = `<div class="card" style="margin-top:30px"><h2>Вкусный баланс</h2><p>${esc(msg)}</p></div>`; }
 // одна карточка на id, даже если строку в листе MyFestive импортировали дважды
 const uniqById = list => (list || []).filter((x, i, a) => a.findIndex(y => y.id === x.id) === i);   // первая, как find на сервере
+// ключи, сохранённые до объединения по жирности («2 5% молок|мл»), приводим к новым («молок|мл») — BUG-057
+const oldKey = k => { const [w, u] = String(k).split('|'); if (!/%/.test(w)) return k; return w.split(' ').filter(x => !/^\d+%?$/.test(x)).join(' ') + '|' + (u || ''); };
 function afterBoot(){
   D.myfest = uniqById(D.myfest);
+  const sh = {}; Object.keys(D.shop || {}).forEach(k => { const i = k.indexOf('|'), nk = k.slice(0, i + 1) + oldKey(k.slice(i + 1)); if (!sh[nk] || D.shop[k]) sh[nk] = D.shop[k]; }); D.shop = sh;
+  if (D.shopQty) { const q = {}; Object.keys(D.shopQty).forEach(k => { const i = k.indexOf('|'); q[k.slice(0, i + 1) + oldKey(k.slice(i + 1))] = D.shopQty[k]; }); D.shopQty = q; }
+  D.pantry = (D.pantry || []).map(x => Object.assign({}, x, {key: oldKey(x.key)}));
   // началась новая пара дней — списываем из запаса то, что уйдёт на её блюда (сервер делает это один раз на пару)
   if (!(D.consumed || []).includes(D.blocks[0])) {                          // отмечаем начало пары даже при пустом запасе
     const n = blockNeeds(0), items = [...n.map.entries()].filter(([, it]) => !it.raw).map(([key, it]) => ({key, qty: Math.round(it.q * 10) / 10}));
@@ -746,14 +751,14 @@ function joinBroken(lines){
 }
 // Ключ строки покупок: «сыр твердый» = «твердый сыр», «подсолнечное масло» = «масла подсолнечного»
 const stem = w => w.replace(/ё/g, 'е').replace(/(ого|его|ому|ему|ыми|ими|ой|ей|ый|ий|ая|яя|ое|ее|ые|ие|ых|их|ую|юю|ом|ем|ам|ям|ах|ях|а|я|ы|и|у|ю|о|е|ь|й)$/, '').slice(0, 6);
-const shopKey = name => name.toLowerCase().split(/[^а-яёa-z0-9%]+/).filter(Boolean).map(stem).filter(Boolean).sort().join(' ');
+const shopKey = name => name.replace(PCT, ' ').toLowerCase().split(/[^а-яёa-z0-9%]+/).filter(Boolean).map(stem).filter(Boolean).sort().join(' ');
 // sources: [{lines, f}] → продукты по разделам. f — во сколько раз умножить количества.
 function shopBuild(sources){
   const map = new Map();
   sources.forEach(({lines, f, cat}) => { if (!f) return;                          // блюдо никто не ест — продукты не нужны
     joinBroken(lines).map(l => l.replace(/[.\s]*для [а-яё ]+:$/i, '')).filter(l => /[а-яё]/i.test(l) && !/:$/.test(l)).forEach(line => {   // без «…для соуса:», «(на 2 порции):»
       const it = parseLine(line), pct = it.name.match(PCT) || [], base = it.name.replace(PCT, ' ').replace(/\s{2,}/g, ' ').trim() || it.name;
-      const key = (shopKey(base) + '|' + it.u).slice(0, 90);                     // «молоко 2,5%» и «3,5% молоко» — одна строка
+      const key = (shopKey(base) + '|' + it.u).slice(0, 90);                     // «молоко 2,5%» и «3,5% молоко» — одна строка (shopKey без %)
       const cur = map.get(key) || {name: base, q: 0, u: it.u, raw: it.q == null, cat, v: []}; if (it.q != null) { cur.q += it.q*f; cur.raw = false; }
       if (base.length < cur.name.length) cur.name = base;                        // из «репчатого лука» и «лук репчатый» показываем короче
       pct.forEach(x => { x = x.replace(/\s/g, '').replace('.', ','); if (!cur.v.includes(x)) cur.v.push(x); });
