@@ -1378,7 +1378,7 @@ scr.addEventListener('click', e => {
     if (on) D.diary.push({id:'m' + it, kind:'meal', ref:'meal:' + it, name:dish.n, kcal:dish.k*k, p:dish.p.map(x => x*k)});
     render(); save('eat', {type: it, on, name: dish.n, kcal: dish.k*k, pfc: dish.p.map(x => x*k)}); }
   else if (d.del) { D.diary = D.diary.filter(x => x.id !== d.del); render(); save('delExtra', {id: d.del}); }
-  else if (d.water) { D.water = Math.max(0, D.water + (+d.water)); render(); save('water', {delta: +d.water}).then(ml => { D.water = ml; render(); }); }
+  else if (d.water) { D.water = Math.max(0, D.water + (+d.water)); render(); save('water', {delta: +d.water}).then(ml => { D.water = ml; render(); }, () => { D.water = Math.max(0, D.water - (+d.water)); render(); }); }
   else if (d.vit) { const on = !D.vitlog.includes(d.vit), [id, slot] = d.vit.split('@');
     D.vitlog = on ? [...D.vitlog, d.vit] : D.vitlog.filter(x => x !== d.vit); render(); save('vit', {id, slot, done: on}); }
   else if (d.act === 'add') addSheet();
