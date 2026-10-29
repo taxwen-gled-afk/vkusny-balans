@@ -264,7 +264,8 @@ function call(action, payload){
 let queue = Promise.resolve();
 function save(action, payload, okMsg){
   const run = () => call(action, payload).then(r => { if (okMsg) toast(okMsg); return r; })
-    .catch(e => { toast('Не сохранилось: ' + (e && e.message || e)); throw e; });
+    .catch(e => { const m = String(e && e.message || e);   // ошибка блокировки Google приходит на языке аккаунта владельца
+      toast('Не сохранилось: ' + (/lock|exklusiv|блокировк|verrou|bloqueo/i.test(m) ? 'сервер занят, попробуйте ещё раз через минуту' : m)); throw e; });
   const p = queue.then(run, run);
   queue = p.catch(() => {});
   return p;
