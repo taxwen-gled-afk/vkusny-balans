@@ -334,7 +334,8 @@ function afterBoot(){
 // ---------- модель ----------
 const byId = id => D.catalog.dishes.find(d => d.id === id);
 // меню 1–13 — «Меню N»; сборники — по названию. Рецепт сборника рассчитан на np порций, меню — на 2 (1 человек × 2 дня)
-const MENU_NAMES = {101: 'Завтраки', 102: 'Ужины', 201: 'Заготовки'};
+// 201+ — заготовки из курсов: название курса и автор рецепта
+const MENU_NAMES = {101: 'Завтраки', 102: 'Ужины', 201: 'Кулинарный лагерь · Вероника Мамедова', 202: 'Мастер полуфабрикатов · Ирина Выходцева', 203: 'МК по полуфабрикатам · Юлия Зверева', 204: 'Гастрономия · Шелушенко', 205: 'Наши рецепты'};
 const menuName = m => MENU_NAMES[m] || 'Меню ' + m;
 const cookFactor = (d, f) => f * 2 / (d.np || 2);   // во сколько раз увеличить рецепт, чтобы накормить f порций на 2 дня
 const myProfile = () => D.profiles.find(p => p.id === D.me);
@@ -980,9 +981,9 @@ function scaleStep(s, f){
 }
 function recipeHTML(parts, f){
   return parts.map(p => `<section class="card recipe">
-    ${p.t || p.y ? `<h3>${esc(p.t || '')}${p.t && p.y ? ' · ' : ''}${p.y ? 'ингредиенты ' + esc(p.y) : ''}</h3>` : ''}
+    ${p.t || p.y ? `<h3>${esc(p.t || '')}${p.t && p.y ? ' · ' : ''}${p.y ? (/^(на|≈)\s/.test(p.y) ? '' : 'ингредиенты ') + esc(p.y) : ''}</h3>` : ''}
     ${p.i && p.i.length ? `<ul class="ings">${joinBroken(p.i).map(l => `<li>${scaleIng(l, f)}</li>`).join('')}</ul>` : ''}
-    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${scaleStep(s, f)}</li>`).join('')}</ol>` : ''}
+    ${p.p && p.p.length ? `<ol class="steps">${p.p.map(noWM).filter(Boolean).map(s => `<li>${scaleStep(s, p.i && p.i.length ? f : 1)}</li>`).join('')}</ol>` : ''}
   </section>`).join('') || '<p class="small muted">Для этого блюда рецепт не нужен.</p>';
 }
 const familyFactor = () => members().reduce((a, m) => a + m.k, 0);
@@ -1026,7 +1027,7 @@ function dishSheet(id){
     ${n.target ? `<div class="small muted">Ваша порция: ×${kd.toFixed(2).replace('.', ',')}, это ${fmt(d.k*kd)} ккал</div>` : ''}
     ${weightsHTML(d)}
     <div class="field">Заготовка<div class="seg" id="prepSeg" style="flex-wrap:wrap">${[['', 'Нет'], ['b', 'Завтрак'], ['m', 'Второе'], ['g', 'Гарнир'], ['f', 'Свежий гарнир']].map(([c, t]) => `<button type="button" aria-pressed="${(d.prep || '') === c}" data-prep="${c}">${t}</button>`).join('')}</div></div>
-    ${d.r.length ? `<div class="seg"><button type="button" aria-pressed="${!wb}" data-sc="1">${d.m > 100 ? 'Как в рецепте, ' + (d.np || 2) + ' порц.' : 'Как в меню, 2 порции'}</button>${wb ? `<button type="button" aria-pressed="true" data-sc="${wb.rf}">На заготовки ×${wb.rf.toFixed(1).replace('.', ',')}</button>` : `<button type="button" aria-pressed="false" data-sc="${cookFactor(d, familyFactor())}">На семью на 2 дня ×${cookFactor(d, familyFactor()).toFixed(1)}</button>`}</div>` : ''}
+    ${d.r.length ? `<div class="seg"><button type="button" aria-pressed="${!wb}" data-sc="1">${d.m > 200 || (d.m > 100 && d.r[0] && d.r[0].y) ? 'Как в рецепте' + (d.r[0] && d.r[0].y ? ', ' + esc(d.r[0].y.replace(/^на\s+/, '')) : '') : d.m > 100 ? 'Как в рецепте, ' + (d.np || 2) + ' порц.' : 'Как в меню, 2 порции'}</button>${wb ? `<button type="button" aria-pressed="true" data-sc="${wb.rf}">На заготовки ×${wb.rf.toFixed(1).replace('.', ',')}</button>` : `<button type="button" aria-pressed="false" data-sc="${cookFactor(d, familyFactor())}">На семью на 2 дня ×${cookFactor(d, familyFactor()).toFixed(1)}</button>`}</div>` : ''}
     <div id="recipe" style="display:flex;flex-direction:column;gap:10px">${recipeHTML(d.r, wb ? wb.rf : 1)}</div>`, sh => {
     sh.querySelector('#prepSeg').addEventListener('click', e => { const b = e.target.closest('[data-prep]'); if (!b) return; const v = b.dataset.prep;
       d.prep = v; sh.querySelectorAll('[data-prep]').forEach(x => x.setAttribute('aria-pressed', x === b)); render();
@@ -1048,6 +1049,21 @@ function dishSheet(id){
 const NUTRI = [
   ['бульон|нори|соль|перец черн|перец молот|специ|приправ|паприк|куркум|карри|зир[аы]|орегано|базилик сух|прованск|итальянск трав|лавров|ванил|разрыхл|сода|желатин|дрожж|корица|мускат|хмели|чесночн порош|сухой чеснок|чеснок сух|уксус|вода|воды|кипят|лед|сахарозамен|подсластит|стеви|эритрит|пребиосвит|фитпарад|по вкусу', 0, 0, 0, 0],
   ['шпик|сало(?![а-яё])|курдюк', 800, 2, 89, 0],
+  ['жир говяж|говяжий жир|жирок', 900, 0, 99, 0],
+  ['куриное филе|филе куриное|куриная грудка|грудка куриная', 113, 24, 2, 0, 250],
+  ['дорадо|сибас', 100, 18, 3, 0, 350],
+  ['судак|пикш|треск|минта|хек', 80, 18, 1, 0],
+  ['сельд', 220, 18, 16, 0, 250],
+  ['говяжий язык|язык говяж', 230, 16, 18, 0],
+  ['ребр|рёбр|рульк', 320, 16, 28, 0],
+  ['утк|утин', 300, 16, 26, 0, 2000],
+  ['мидии|мидий', 80, 12, 2, 3],
+  ['стейк', 230, 19, 17, 0, 400],
+  ['вино', 75, 0, 0, 2],
+  ['сулугун', 290, 20, 24, 0],
+  ['маков|мак(?![а-яё])', 330, 14, 25, 30],
+  ['блины|блинчики', 200, 6, 8, 26, 45],
+  ['салат лист|листовой салат|лист салата', 15, 1, 0, 2, 10],
   ['аджик', 60, 1, 4, 6],
   ['имбир', 80, 2, 1, 16],
   ['базилик', 23, 3, 1, 3],
